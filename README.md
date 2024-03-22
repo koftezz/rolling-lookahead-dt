@@ -69,4 +69,4 @@ Parameters for the run function is follows:
 }
 ```
 
-[Contact Us](mailto:batuhan.organ@ozu.edu.tr){: .btn .btn-primary }
+Feel free to [reach out to us](mailto:batuhan.organ@ozu.edu.tr)
