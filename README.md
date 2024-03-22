@@ -68,3 +68,5 @@ Parameters for the run function is follows:
       primaryClass={cs.LG}
 }
 ```
+
+[Contact Us](mailto:batuhan.organ@ozu.edu.tr){: .btn .btn-primary }
