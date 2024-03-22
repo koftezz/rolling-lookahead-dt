@@ -1,6 +1,7 @@
-from model.rolling_optimize import _rolling_optimize
-from oct.tree import *
-from oct.optimal_tree import *
+from rollo_oct.model.rolling_optimize import _rolling_optimize
+from rollo_oct.oct.tree import *
+from rollo_oct.oct.optimal_tree import *
+from rollo_oct.utils.helpers import preprocess_dataframes
 
 import pandas as pd
 import time
@@ -8,12 +9,16 @@ import time
 
 def run(train: pd.DataFrame,
         test: pd.DataFrame,
+        target_label: str = "y",
+        features: List = None,
         depth: int = 2,
         criterion: str = "gini",
         time_limit: int = 1800,
         big_m: int = 99):
     """
 
+    :param target_label:
+    :param features:
     :param train:
     :param test:
     :param depth:
@@ -22,6 +27,14 @@ def run(train: pd.DataFrame,
     :param big_m:
     :return:
     """
+    # Example Usage:
+    # Assuming df is your pandas DataFrame
+    train, test = preprocess_dataframes(
+        train_df=train,
+        test_df=test,
+        target_label=target_label,
+        features=features)
+
     df = pd.concat([train, test])
     P = [int(i) for i in
          list(train.loc[:, train.columns != 'y'].columns)]

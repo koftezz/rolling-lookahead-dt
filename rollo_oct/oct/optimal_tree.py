@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from gurobipy import *
 
-from oct.tree import generate_nodes, calculate_gini, \
+from rollo_oct.oct.tree import generate_nodes, calculate_gini, \
     calculate_misclassification
 
 

@@ -1,9 +1,9 @@
 from typing import Optional
 import time
 
-from oct.optimal_tree import predict_model, generate_model, \
+from rollo_oct.oct.optimal_tree import predict_model, generate_model, \
     train_model
-from oct.tree import *
+from rollo_oct.oct.tree import *
 
 
 def _rolling_optimize(predefined_model: Optional[dict],

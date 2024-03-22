@@ -94,3 +94,39 @@ def make_data_binary(data: pd.DataFrame) -> pd.DataFrame:
     data.rename(columns=dict(zip(old_names, new_names)), inplace=True)
     logging.info("Data is binarized.")
     return data
+
+
+def preprocess_dataframes(train_df: pd.DataFrame, test_df: pd.DataFrame, target_label: str, features: list):
+    """
+    Rearranges the DataFrames such that the target label becomes the first column,
+    and feature names are converted into ordinal numbers.
+
+    Args:
+    - train_df: pandas DataFrame containing the training data
+    - test_df: pandas DataFrame containing the test data
+    - target_label: string representing the target label
+    - features: list of strings representing feature names
+
+    Returns:
+    - pd.DataFrame: preprocessed training DataFrame
+    - pd.DataFrame: preprocessed test DataFrame
+    """
+
+    # Move target label to the first column for both train and test DataFrames
+    if target_label in train_df.columns:
+        train_target_idx = train_df.columns.get_loc(target_label)
+        train_df_columns = list(train_df.columns)
+        train_df_columns = [train_df_columns[train_target_idx]] + train_df_columns[:train_target_idx] + train_df_columns[train_target_idx + 1:]
+        train_df = train_df[train_df_columns]
+
+    if target_label in test_df.columns:
+        test_target_idx = test_df.columns.get_loc(target_label)
+        test_df_columns = list(test_df.columns)
+        test_df_columns = [test_df_columns[test_target_idx]] + test_df_columns[:test_target_idx] + test_df_columns[test_target_idx + 1:]
+        test_df = test_df[test_df_columns]
+
+    # Rename features to ordinal numbers for both train and test DataFrames
+    train_df.rename(columns={feature: str(i) for i, feature in enumerate(features, start=1)}, inplace=True)
+    test_df.rename(columns={feature: str(i) for i, feature in enumerate(features, start=1)}, inplace=True)
+
+    return train_df, test_df
