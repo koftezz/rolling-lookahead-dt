@@ -292,11 +292,6 @@ def calculate_gini(data: pd.DataFrame,
                                                             instance_size=n,
                                                             K=K,
                                                             weighted=True)
-            if len(arr_2) > 0:
-                temp[feature_i] = gini_index(arr=arr,
-                                             instance_size=n,
-                                             K=K,
-                                             weighted=True)
         gini_dict[leaf_] = copy.deepcopy(temp)
         del temp
         del arr
