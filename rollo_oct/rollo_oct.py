@@ -27,8 +27,7 @@ def run(train: pd.DataFrame,
     :param big_m:
     :return:
     """
-    # Example Usage:
-    # Assuming df is your pandas DataFrame
+
     train, test = preprocess_dataframes(
         train_df=train,
         test_df=test,
