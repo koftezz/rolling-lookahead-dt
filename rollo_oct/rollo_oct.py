@@ -43,7 +43,7 @@ def run(train: pd.DataFrame,
     result_dict = {}
     main_model_time = time.time()
     # generate model
-    main_model = generate_model(P=P, K=K, data=train, y_idx=0, big_m=big_m)
+    main_model = generate_model(P=P, K=K, data=train, y_idx=0, big_m=big_m, criterion=criterion)
     # train model
     main_model = train_model(model_dict=main_model, data=train, P=P)
     # predict model
