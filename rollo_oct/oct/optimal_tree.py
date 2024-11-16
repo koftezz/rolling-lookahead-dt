@@ -99,7 +99,7 @@ def generate_model(
     if time_limit:
         m.setParam("TimeLimit", time_limit)
         logging.info(f'Setting Time Limit as {time_limit}')
-    if gap_limit:
+    if gap_limit is not None:
         m.setParam("MipGap", gap_limit)
         logging.info(f'Setting Optimality Gap as {gap_limit}')
     m.setParam("LogToConsole", int(log_to_console))
