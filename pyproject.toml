@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rollo-oct"
+version = "0.1.0"
+description = "Rolling Lookahead Optimal Classification Trees"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.9"
+authors = [
+    { name = "Zeynel Batuhan Organ", email = "batuhan.organ@ozu.edu.tr" },
+]
+keywords = ["decision-trees", "classification", "mixed-integer-programming", "optimal-trees", "machine-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pulp>=2.7",
+    "highspy>=1.5",
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+gurobi = ["gurobipy>=10.0"]
+dev = [
+    "pytest>=7.0",
+    "jupyter",
+]
+
+[project.urls]
+Homepage = "https://github.com/batuhanorgan/rolling-lookahead-dt"
+Repository = "https://github.com/batuhanorgan/rolling-lookahead-dt"
+Paper = "https://arxiv.org/abs/2304.10830"
+
+[tool.setuptools.packages.find]
+include = ["rollo_oct*"]
+
+[tool.setuptools.package-data]
+"rollo_oct" = ["data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,58 @@
+"""Solver abstraction layer: status codes, result containers, and configuration."""
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
+
+class SolverStatus(Enum):
+    OPTIMAL = "optimal"
+    TIME_LIMIT = "time_limit"
+    INFEASIBLE = "infeasible"
+    UNBOUNDED = "unbounded"
+    ERROR = "error"
+
+
+@dataclass
+class OCT2Solution:
+    """Result of solving a single depth-2 OCT problem."""
+
+    status: SolverStatus
+    root_feature: Optional[int] = None
+    left_feature: Optional[int] = None
+    right_feature: Optional[int] = None
+    leaf_classes: Optional[dict] = field(default_factory=dict)
+    objective_value: Optional[float] = None
+    runtime: Optional[float] = None
+    mip_gap: Optional[float] = None
+
+
+class SolverConfig:
+    """Configuration for the optimization solver.
+
+    Args:
+        solver_name: "highs" (open-source, bundled with PuLP) or "gurobi" (commercial).
+        time_limit: Maximum solve time per subproblem in seconds.
+        mip_gap: Relative MIP optimality gap tolerance (e.g., 0.01 for 1%).
+        log_to_console: Whether to print solver output.
+        big_m: Penalty for empty-leaf feature pairs in the objective.
+    """
+
+    def __init__(
+        self,
+        solver_name: str = "highs",
+        time_limit: float = 1800,
+        mip_gap: Optional[float] = None,
+        log_to_console: bool = False,
+        big_m: float = 99,
+    ):
+        self.solver_name = solver_name.lower()
+        self.time_limit = time_limit
+        self.mip_gap = mip_gap
+        self.log_to_console = log_to_console
+        self.big_m = big_m
+
+        if self.solver_name not in ("highs", "gurobi", "cbc"):
+            raise ValueError(
+                f"Unknown solver '{solver_name}'. Choose 'highs', 'gurobi', or 'cbc'."
+            )

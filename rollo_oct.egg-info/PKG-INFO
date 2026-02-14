@@ -1,3 +1,37 @@
+Metadata-Version: 2.4
+Name: rollo-oct
+Version: 0.1.0
+Summary: Rolling Lookahead Optimal Classification Trees
+Author-email: Zeynel Batuhan Organ <batuhan.organ@ozu.edu.tr>
+License-Expression: GPL-3.0-or-later
+Project-URL: Homepage, https://github.com/batuhanorgan/rolling-lookahead-dt
+Project-URL: Repository, https://github.com/batuhanorgan/rolling-lookahead-dt
+Project-URL: Paper, https://arxiv.org/abs/2304.10830
+Keywords: decision-trees,classification,mixed-integer-programming,optimal-trees,machine-learning
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Science/Research
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pulp>=2.7
+Requires-Dist: highspy>=1.5
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=2.0
+Provides-Extra: gurobi
+Requires-Dist: gurobipy>=10.0; extra == "gurobi"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: jupyter; extra == "dev"
+Dynamic: license-file
+
 # RollOCT — Rolling Lookahead Optimal Classification Trees
 
 An implementation of the rolling subtree lookahead algorithm from ["Rolling Lookahead Learning for Optimal Classification Trees"](https://arxiv.org/abs/2304.10830).
@@ -17,21 +51,15 @@ RollOCT builds interpretable decision trees by solving a sequence of small mixed
 ## Installation
 
 ```bash
-pip install .
+pip install -r requirements.txt
 ```
 
-Or in editable/development mode:
-
-```bash
-pip install -e ".[dev]"
-```
-
-Dependencies: `pulp`, `highspy`, `numpy`, `pandas`.
+Dependencies: `pulp`, `highspy`, `numpy`, `pandas`. For development: `pytest`.
 
 To use the Gurobi solver backend, install it separately:
 
 ```bash
-pip install ".[gurobi]"
+pip install gurobipy
 ```
 
 ## Quick Start
