@@ -1,3 +1,5 @@
-gurobipy==11.0.0
-numpy==1.24.4
-pandas==2.0.3
+pulp>=2.7
+highspy>=1.5
+numpy>=1.24
+pandas>=2.0
+pytest>=7.0

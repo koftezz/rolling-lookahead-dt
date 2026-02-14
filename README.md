@@ -1,72 +1,163 @@
-# Rolling Lookahead Decision Trees
+# RollOCT — Rolling Lookahead Optimal Classification Trees
 
-This repository contains an implementation of a decision tree classifier based on the rolling subtree lookahead algorithm proposed in the paper ["Rolling Lookahead Learning for Optimal Classification Trees"](https://arxiv.org/abs/2304.10830).
+An implementation of the rolling subtree lookahead algorithm from ["Rolling Lookahead Learning for Optimal Classification Trees"](https://www.tandfonline.com/doi/abs/10.1080/24725854.2026.2613786) (published in *IISE Transactions*).
 
-## Abstract
+RollOCT builds interpretable decision trees by solving a sequence of small mixed-integer programs (MIPs). It starts with an optimal depth-2 tree and iteratively expands misclassified leaves, combining the scalability of greedy methods with the optimality guarantees of MIP-based approaches.
 
-Classification trees continue to be widely adopted in machine learning applications due to their inherently interpretable nature and scalability. We propose a rolling subtree lookahead algorithm that combines the relative scalability of the myopic approaches with the foresight of the optimal approaches in constructing trees. The limited foresight embedded in our algorithm mitigates the learning pathology observed in optimal approaches. At the heart of our algorithm lies a novel two-depth optimal binary classification tree formulation flexible to handle any loss function. We show that the feasible region of this formulation is an integral polyhedron, yielding the LP relaxation solution optimal. Through extensive computational analyses, we demonstrate that our approach outperforms optimal and myopic approaches in 808 out of 1330 problem instances, improving the out-of-sample accuracy by up to 23.6% and 14.4%, respectively.
+## Features
 
+- **Solver-agnostic** — uses [PuLP](https://github.com/coin-or/pulp) so you can choose between:
+  - **HiGHS** (open-source, installed by default)
+  - **Gurobi** (commercial, optional — install `gurobipy` separately)
+  - **CBC** (open-source, bundled with PuLP)
+- **sklearn-style API** — `fit()` / `predict()` / `score()`
+- **Two impurity criteria** — Gini index or misclassification error
+- **Arbitrary depth** — depth-2 base tree extended via rolling subtree optimization
 
-## Important Notice
+## Installation
 
-- **Binary Data**: This classifier is designed specifically for binary data but it can work for both binary & multi-class classification tasks.
-- **Gurobi Solver**: You need to have the Gurobi solver installed on your computer to run this code. Make sure it's properly configured and accessible in your environment.
-- **Code Quality**: Please note that the code in this repository may not be optimized or well-organized. It is provided for demonstration purposes and may be updated in the future to improve readability and efficiency.
-- An example dataset is provided under data/train.csv & data/test.csv which is binarized version of [Wine Dataset](https://archive.ics.uci.edu/dataset/109/wine)
+```bash
+pip install .
+```
 
+Or in editable/development mode:
 
-## How to Run
+```bash
+pip install -e ".[dev]"
+```
 
-To run the decision tree classifier, follow these steps:
+Dependencies: `pulp`, `highspy`, `numpy`, `pandas`.
 
-1. Install the required dependencies by running:
-   `pip install -r requirements.txt`
+To use the Gurobi solver backend, install it separately:
 
-2. Import the `run` function from the provided module and call it with the appropriate arguments. Here's the function signature:
+```bash
+pip install ".[gurobi]"
+```
+
+## Quick Start
+
 ```python
-
-
 import pandas as pd
-from rollo_oct import rollo_oct
+from rollo_oct import RollingOCT
 
-# Load your training and test datasets
-train_data = pd.read_csv("data/train.csv")
-test_data = pd.read_csv("data/test.csv")
+# Load data
+train = pd.read_csv("rollo_oct/data/train.csv")
+X_train = train.drop("y", axis=1)
+y_train = train["y"]
 
-# get features
-feature_columns = train_data.columns[1:]
+test = pd.read_csv("rollo_oct/data/test.csv")
+X_test = test.drop("y", axis=1)
+y_test = test["y"]
 
-# Run the classifier
-result = rollo_oct.run(
-        train=train_data,
-        test=test_data,
-        target_label="y",
-        features=feature_columns,
-        depth=2,
-        criterion="gini"
+# Train a depth-3 tree using the open-source HiGHS solver
+model = RollingOCT(depth=3, criterion="gini", solver="highs")
+model.fit(X_train, y_train)
+
+# Evaluate
+print(f"Test accuracy: {model.score(X_test, y_test):.3f}")
+```
+
+## API Reference
+
+### `RollingOCT`
+
+```python
+RollingOCT(
+    depth=2,              # Maximum tree depth (>= 2)
+    criterion="gini",     # "gini" or "misclassification"
+    solver="highs",       # "highs", "gurobi", or "cbc"
+    time_limit=1800,      # Max seconds per depth-2 subproblem
+    mip_gap=None,         # MIP optimality gap (e.g. 0.01 for 1%)
+    big_m=99,             # Penalty for empty-leaf splits
+    log_to_console=False,
+    min_samples_split=2,  # Min samples to solve a subproblem
+    min_samples_leaf=1,   # Min samples per leaf node
 )
 ```
-Parameters for the run function is follows:
 
-- `train`: A pandas DataFrame containing the training dataset.
-- `test`: A pandas DataFrame containing the test dataset.
-- `target_label`: Target label to predict.
-- `features`: A list of features to train on.
-- `depth`: Maximum depth of the decision tree (default is 2).
-- `criterion`: Splitting criterion for the decision tree can be "misclassification" or "gini"(default is "gini").
-- `time_limit`: Time limit for training in seconds (default is 1800).
-- `big_m`: Value of big M used in the optimization model (default is 99).
+**Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `fit(X, y)` | Train the model. `X` is a binary feature matrix (DataFrame or array), `y` is the target. Returns `self`. |
+| `predict(X)` | Return class predictions as a numpy array. |
+| `score(X, y)` | Return accuracy (fraction correct). |
+
+**Attributes (after fitting):**
+
+| Attribute | Description |
+|-----------|-------------|
+| `tree_` | The fitted `DecisionTree` object |
+| `depth_results_` | Dict mapping depth → `DepthResult(depth, training_accuracy, test_accuracy, elapsed_time)` |
+| `classes_` | Sorted list of unique class labels |
+| `features_` | List of feature indices used |
+
+### Solver Options
+
+| Solver | Install | Notes |
+|--------|---------|-------|
+| `"highs"` | `pip install highspy` (included in requirements) | Best open-source MIP solver. Default. |
+| `"gurobi"` | `pip install gurobipy` + license | Fastest commercial solver. |
+| `"cbc"` | Bundled with PuLP | Fallback open-source solver. |
+
+## Examples
+
+See the `examples/` directory for Jupyter notebooks:
+
+- **[01_quickstart.ipynb](examples/01_quickstart.ipynb)** — Basic usage: load data, train, predict, evaluate
+- **[02_advanced.ipynb](examples/02_advanced.ipynb)** — Comparing solvers, criteria, and tree depths
+
+## Dataset
+
+An example dataset is provided under `rollo_oct/data/` — a binarized version of the [Wine Dataset](https://archive.ics.uci.edu/dataset/109/wine) (3-class, 130 binary features).
+
+## How It Works
+
+1. **OCT-2 Formulation**: Solves a MIP to find the optimal depth-2 binary classification tree. Binary variables select which feature to split on at each node, and the objective minimizes total leaf impurity.
+
+2. **Rolling Subtree (RST) Algorithm**: Identifies misclassified leaves, groups them by parent, then solves a new OCT-2 subproblem for each parent's data subset. The resulting subtrees are merged back into the main tree. This repeats level-by-level until the target depth is reached.
+
+3. **LP Relaxation Integrality**: The OCT-2 formulation's feasible region is an integral polyhedron (Proposition 2 in the paper), so the LP relaxation always yields an integer-optimal solution.
+
+## Project Structure
+
+```
+rollo_oct/
+    __init__.py              # Public API: RollingOCT, SolverConfig, etc.
+    classifier.py            # RollingOCT (sklearn-like fit/predict)
+    tree/
+        nodes.py             # DecisionNode, LeafNode, DecisionTree
+        impurity.py          # GiniCriterion, MisclassificationCriterion
+        utils.py             # Node generation, index mapping helpers
+    solver/
+        base.py              # SolverStatus, OCT2Solution, SolverConfig
+        pulp_solver.py       # PuLPOCT2Solver (HiGHS / Gurobi / CBC)
+    rolling/
+        optimizer.py         # RollingOptimizer, DepthResult
+    preprocessing/
+        helpers.py           # Data binarization and preprocessing
+    data/
+        train.csv, test.csv  # Example Wine dataset
+tests/                       # 70 pytest test cases
+examples/                    # Jupyter notebooks
+```
 
 ## Citation
-```
-@misc{organ2023rolling,
-      title={Rolling Lookahead Learning for Optimal Classification Trees}, 
+
+```bibtex
+@article{organ2026rolling,
+      title={Rolling Lookahead Learning for Optimal Classification Trees},
       author={Zeynel Batuhan Organ and Enis Kayış and Taghi Khaniyev},
-      year={2023},
-      eprint={2304.10830},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+      journal={IISE Transactions},
+      year={2026},
+      publisher={Taylor \& Francis},
+      doi={10.1080/24725854.2026.2613786},
+      url={https://www.tandfonline.com/doi/abs/10.1080/24725854.2026.2613786}
 }
 ```
 
-Feel free to [reach out to us](mailto:batuhan.organ@ozu.edu.tr)
+A preprint is also available on [arXiv (2304.10830)](https://arxiv.org/abs/2304.10830).
+
+## Contact
+
+Feel free to [reach out](mailto:batuhan.organ@ozu.edu.tr) with questions or feedback.
