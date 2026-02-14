@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from rollo_oct.tree.impurity import (
+from rollotree.tree.impurity import (
     GiniCriterion,
     MisclassificationCriterion,
     get_criterion,

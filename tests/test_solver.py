@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rollo_oct.solver.base import SolverConfig, SolverStatus, OCT2Solution
-from rollo_oct.solver.pulp_solver import PuLPOCT2Solver
-from rollo_oct.tree.impurity import GiniCriterion, MisclassificationCriterion
+from rollotree.solver.base import SolverConfig, SolverStatus, OCT2Solution
+from rollotree.solver.pulp_solver import PuLPOCT2Solver
+from rollotree.tree.impurity import GiniCriterion, MisclassificationCriterion
 
 
 class TestSolverConfig:

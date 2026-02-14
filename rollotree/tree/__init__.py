@@ -1,11 +1,11 @@
-from rollo_oct.tree.nodes import DecisionNode, LeafNode, DecisionTree
-from rollo_oct.tree.impurity import (
+from rollotree.tree.nodes import DecisionNode, LeafNode, DecisionTree
+from rollotree.tree.impurity import (
     ImpurityCriterion,
     GiniCriterion,
     MisclassificationCriterion,
     get_criterion,
 )
-from rollo_oct.tree.utils import (
+from rollotree.tree.utils import (
     generate_nodes,
     get_leaf_paths_depth2,
     leaf_pattern,

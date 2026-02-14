@@ -13,17 +13,17 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from rollo_oct.tree.nodes import DecisionTree
-from rollo_oct.tree.impurity import ImpurityCriterion
-from rollo_oct.tree.utils import (
+from rollotree.tree.nodes import DecisionTree
+from rollotree.tree.impurity import ImpurityCriterion
+from rollotree.tree.utils import (
     generate_nodes,
     get_leaf_paths_depth2,
     leaf_pattern,
     parent_pattern,
     get_child,
 )
-from rollo_oct.solver.base import SolverConfig, SolverStatus, OCT2Solution
-from rollo_oct.solver.pulp_solver import PuLPOCT2Solver
+from rollotree.solver.base import SolverConfig, SolverStatus, OCT2Solution
+from rollotree.solver.pulp_solver import PuLPOCT2Solver
 
 logger = logging.getLogger(__name__)
 

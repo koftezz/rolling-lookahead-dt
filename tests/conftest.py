@@ -57,7 +57,7 @@ def single_class_dataset():
 @pytest.fixture
 def wine_train_data():
     """First 50 rows of the bundled Wine training dataset."""
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "rollo_oct", "data")
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "rollotree", "data")
     path = os.path.join(data_dir, "train.csv")
     if os.path.exists(path):
         return pd.read_csv(path).head(50)
@@ -67,7 +67,7 @@ def wine_train_data():
 @pytest.fixture
 def wine_test_data():
     """First 30 rows of the bundled Wine test dataset."""
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "rollo_oct", "data")
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "rollotree", "data")
     path = os.path.join(data_dir, "test.csv")
     if os.path.exists(path):
         return pd.read_csv(path).head(30)

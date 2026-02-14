@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rollo_oct.solver.base import SolverConfig
-from rollo_oct.tree.impurity import GiniCriterion, MisclassificationCriterion
-from rollo_oct.rolling.optimizer import RollingOptimizer, DepthResult
+from rollotree.solver.base import SolverConfig
+from rollotree.tree.impurity import GiniCriterion, MisclassificationCriterion
+from rollotree.rolling.optimizer import RollingOptimizer, DepthResult
 
 
 def _make_dataset(n=40, n_features=5, n_classes=2, seed=42):
