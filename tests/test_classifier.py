@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rollo_oct import RollingOCT
+from rollotree import RollingOCT
 
 
 def _make_X_y(n=30, n_features=5, n_classes=2, seed=42):

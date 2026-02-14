@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 import numpy as np
 
-from rollo_oct.tree.utils import generate_nodes, leaf_pattern, parent_pattern
+from rollotree.tree.utils import generate_nodes, leaf_pattern, parent_pattern
 
 
 @dataclass

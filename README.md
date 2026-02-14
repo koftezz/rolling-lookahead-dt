@@ -1,8 +1,12 @@
-# RollOCT — Rolling Lookahead Optimal Classification Trees
+# RolloTree — Rolling Lookahead Optimal Classification Trees
+
+[![PyPI version](https://img.shields.io/pypi/v/rollotree)](https://pypi.org/project/rollotree/)
+[![Python](https://img.shields.io/pypi/pyversions/rollotree)](https://pypi.org/project/rollotree/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 An implementation of the rolling subtree lookahead algorithm from ["Rolling Lookahead Learning for Optimal Classification Trees"](https://www.tandfonline.com/doi/abs/10.1080/24725854.2026.2613786) (published in *IISE Transactions*).
 
-RollOCT builds interpretable decision trees by solving a sequence of small mixed-integer programs (MIPs). It starts with an optimal depth-2 tree and iteratively expands misclassified leaves, combining the scalability of greedy methods with the optimality guarantees of MIP-based approaches.
+RolloTree builds interpretable decision trees by solving a sequence of small mixed-integer programs (MIPs). It starts with an optimal depth-2 tree and iteratively expands misclassified leaves, combining the scalability of greedy methods with the optimality guarantees of MIP-based approaches.
 
 ## Features
 
@@ -17,10 +21,10 @@ RollOCT builds interpretable decision trees by solving a sequence of small mixed
 ## Installation
 
 ```bash
-pip install .
+pip install rollotree
 ```
 
-Or in editable/development mode:
+Or in editable/development mode (from a local clone):
 
 ```bash
 pip install -e ".[dev]"
@@ -28,24 +32,24 @@ pip install -e ".[dev]"
 
 Dependencies: `pulp`, `highspy`, `numpy`, `pandas`.
 
-To use the Gurobi solver backend, install it separately:
+To use the Gurobi solver backend:
 
 ```bash
-pip install ".[gurobi]"
+pip install "rollotree[gurobi]"
 ```
 
 ## Quick Start
 
 ```python
 import pandas as pd
-from rollo_oct import RollingOCT
+from rollotree import RollingOCT
 
 # Load data
-train = pd.read_csv("rollo_oct/data/train.csv")
+train = pd.read_csv("rollotree/data/train.csv")
 X_train = train.drop("y", axis=1)
 y_train = train["y"]
 
-test = pd.read_csv("rollo_oct/data/test.csv")
+test = pd.read_csv("rollotree/data/test.csv")
 X_test = test.drop("y", axis=1)
 y_test = test["y"]
 
@@ -104,12 +108,12 @@ RollingOCT(
 
 See the `examples/` directory for Jupyter notebooks:
 
-- **[01_quickstart.ipynb](examples/01_quickstart.ipynb)** — Basic usage: load data, train, predict, evaluate
-- **[02_advanced.ipynb](examples/02_advanced.ipynb)** — Comparing solvers, criteria, and tree depths
+- **[01_quickstart.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/01_quickstart.ipynb)** — Basic usage: load data, train, predict, evaluate
+- **[02_advanced.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/02_advanced.ipynb)** — Comparing solvers, criteria, and tree depths
 
 ## Dataset
 
-An example dataset is provided under `rollo_oct/data/` — a binarized version of the [Wine Dataset](https://archive.ics.uci.edu/dataset/109/wine) (3-class, 130 binary features).
+An example dataset is provided under `rollotree/data/` — a binarized version of the [Wine Dataset](https://archive.ics.uci.edu/dataset/109/wine) (3-class, 130 binary features).
 
 ## How It Works
 
@@ -122,7 +126,7 @@ An example dataset is provided under `rollo_oct/data/` — a binarized version o
 ## Project Structure
 
 ```
-rollo_oct/
+rollotree/
     __init__.py              # Public API: RollingOCT, SolverConfig, etc.
     classifier.py            # RollingOCT (sklearn-like fit/predict)
     tree/

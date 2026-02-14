@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-from rollo_oct.tree.utils import (
+from rollotree.tree.utils import (
     generate_nodes,
     get_leaf_paths_depth2,
     leaf_pattern,
     parent_pattern,
     get_child,
 )
-from rollo_oct.tree.nodes import DecisionNode, LeafNode, DecisionTree
+from rollotree.tree.nodes import DecisionNode, LeafNode, DecisionTree
 
 
 class TestGenerateNodes:
@@ -191,7 +191,7 @@ class TestDecisionTree:
         assert 4 in misclassified
 
     def test_extend_at_leaf(self):
-        from rollo_oct.solver.base import OCT2Solution, SolverStatus
+        from rollotree.solver.base import OCT2Solution, SolverStatus
 
         tree = DecisionTree(depth=2, features=[1, 2, 3])
         tree.set_branch_feature(1, 1)

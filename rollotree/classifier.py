@@ -5,10 +5,10 @@ import logging
 import numpy as np
 import pandas as pd
 
-from rollo_oct.tree.nodes import DecisionTree
-from rollo_oct.tree.impurity import get_criterion
-from rollo_oct.solver.base import SolverConfig
-from rollo_oct.rolling.optimizer import RollingOptimizer
+from rollotree.tree.nodes import DecisionTree
+from rollotree.tree.impurity import get_criterion
+from rollotree.solver.base import SolverConfig
+from rollotree.rolling.optimizer import RollingOptimizer
 
 logger = logging.getLogger(__name__)
 

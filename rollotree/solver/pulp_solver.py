@@ -12,9 +12,9 @@ from pulp import (
     LpStatus,
 )
 
-from rollo_oct.solver.base import OCT2Solution, SolverConfig, SolverStatus
-from rollo_oct.tree.impurity import ImpurityCriterion
-from rollo_oct.tree.utils import generate_nodes, get_leaf_paths_depth2
+from rollotree.solver.base import OCT2Solution, SolverConfig, SolverStatus
+from rollotree.tree.impurity import ImpurityCriterion
+from rollotree.tree.utils import generate_nodes, get_leaf_paths_depth2
 
 logger = logging.getLogger(__name__)
 
