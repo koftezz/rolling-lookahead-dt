@@ -1,6 +1,6 @@
 # RollOCT — Rolling Lookahead Optimal Classification Trees
 
-An implementation of the rolling subtree lookahead algorithm from ["Rolling Lookahead Learning for Optimal Classification Trees"](https://arxiv.org/abs/2304.10830).
+An implementation of the rolling subtree lookahead algorithm from ["Rolling Lookahead Learning for Optimal Classification Trees"](https://www.tandfonline.com/doi/abs/10.1080/24725854.2026.2613786) (published in *IISE Transactions*).
 
 RollOCT builds interpretable decision trees by solving a sequence of small mixed-integer programs (MIPs). It starts with an optimal depth-2 tree and iteratively expands misclassified leaves, combining the scalability of greedy methods with the optimality guarantees of MIP-based approaches.
 
@@ -63,13 +63,15 @@ print(f"Test accuracy: {model.score(X_test, y_test):.3f}")
 
 ```python
 RollingOCT(
-    depth=2,            # Maximum tree depth (>= 2)
-    criterion="gini",   # "gini" or "misclassification"
-    solver="highs",     # "highs", "gurobi", or "cbc"
-    time_limit=1800,    # Max seconds per depth-2 subproblem
-    mip_gap=None,       # MIP optimality gap (e.g. 0.01 for 1%)
-    big_m=99,           # Penalty for empty-leaf splits
-    log_to_console=False
+    depth=2,              # Maximum tree depth (>= 2)
+    criterion="gini",     # "gini" or "misclassification"
+    solver="highs",       # "highs", "gurobi", or "cbc"
+    time_limit=1800,      # Max seconds per depth-2 subproblem
+    mip_gap=None,         # MIP optimality gap (e.g. 0.01 for 1%)
+    big_m=99,             # Penalty for empty-leaf splits
+    log_to_console=False,
+    min_samples_split=2,  # Min samples to solve a subproblem
+    min_samples_leaf=1,   # Min samples per leaf node
 )
 ```
 
@@ -143,15 +145,18 @@ examples/                    # Jupyter notebooks
 ## Citation
 
 ```bibtex
-@misc{organ2023rolling,
+@article{organ2026rolling,
       title={Rolling Lookahead Learning for Optimal Classification Trees},
       author={Zeynel Batuhan Organ and Enis Kayış and Taghi Khaniyev},
-      year={2023},
-      eprint={2304.10830},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+      journal={IISE Transactions},
+      year={2026},
+      publisher={Taylor \& Francis},
+      doi={10.1080/24725854.2026.2613786},
+      url={https://www.tandfonline.com/doi/abs/10.1080/24725854.2026.2613786}
 }
 ```
+
+A preprint is also available on [arXiv (2304.10830)](https://arxiv.org/abs/2304.10830).
 
 ## Contact
 

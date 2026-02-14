@@ -1,6 +1,6 @@
 """Decision tree node classes and tree structure."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 import numpy as np
 
@@ -99,20 +99,8 @@ class DecisionTree:
 
     def predict_single(self, x: np.ndarray) -> int:
         """Route a single sample through the tree and return prediction."""
-        t = 1
-        d = 0
-        while d < self.depth:
-            node = self.branch_nodes.get(t)
-            if node is None or node.feature_vector is None:
-                break
-            if node.feature_vector.dot(x) == 1:
-                t = t * 2  # left child
-            else:
-                t = t * 2 + 1  # right child
-            d += 1
-            if t in self._pruned_node_ids:
-                break
-        return self.leaf_nodes[t].predicted_class
+        leaf_id = self._route_to_leaf(x)
+        return self.leaf_nodes[leaf_id].predicted_class
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict for a 2D array of samples (n_samples, n_features)."""
@@ -129,9 +117,7 @@ class DecisionTree:
         leaf_classes: dict = {}
         for i in range(len(X)):
             leaf_id = self._route_to_leaf(X[i])
-            if leaf_id not in leaf_classes:
-                leaf_classes[leaf_id] = set()
-            leaf_classes[leaf_id].add(y[i])
+            leaf_classes.setdefault(leaf_id, set()).add(y[i])
 
         return [lid for lid, classes in leaf_classes.items() if len(classes) > 1]
 

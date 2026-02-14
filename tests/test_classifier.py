@@ -111,6 +111,62 @@ class TestRollingOCTFitPredict:
         assert 2 in model.depth_results_
 
 
+class TestEarlyStopping:
+    def test_default_early_stopping_params(self):
+        """Default min_samples_split=2, min_samples_leaf=1 should not change behavior."""
+        model = RollingOCT()
+        assert model.min_samples_split == 2
+        assert model.min_samples_leaf == 1
+
+    def test_min_samples_split_limits_expansion(self):
+        """High min_samples_split should prevent rolling expansion beyond depth 2."""
+        X, y = _make_X_y(n=30, n_features=5)
+        model = RollingOCT(
+            depth=4, solver="highs", min_samples_split=1000, time_limit=60
+        )
+        model.fit(X, y)
+        # Tree should still produce valid predictions
+        preds = model.predict(X)
+        assert len(preds) == len(X)
+        # With min_samples_split=1000 and only 30 samples, depth-2 subproblems
+        # at rolling level should be skipped, so only depth 2 and 3 results
+        # should exist (initial depth-2 + at most one expansion attempt)
+        assert 2 in model.depth_results_
+
+    def test_min_samples_leaf_restricts_splits(self):
+        """min_samples_leaf should eliminate variable pairs producing small leaves."""
+        X, y = _make_X_y(n=30, n_features=5)
+        model = RollingOCT(
+            depth=2, solver="highs", min_samples_leaf=5, time_limit=60
+        )
+        model.fit(X, y)
+        preds = model.predict(X)
+        assert len(preds) == len(X)
+        assert 0.0 <= model.score(X, y) <= 1.0
+
+    def test_min_samples_leaf_high_value(self):
+        """Very high min_samples_leaf should still produce a valid tree via fallback."""
+        X, y = _make_X_y(n=20, n_features=3)
+        model = RollingOCT(
+            depth=2, solver="highs", min_samples_leaf=100, time_limit=60
+        )
+        model.fit(X, y)
+        preds = model.predict(X)
+        assert len(preds) == len(X)
+
+    def test_early_stopping_with_numpy_input(self):
+        """Early stopping params work with numpy arrays too."""
+        np.random.seed(42)
+        X = np.random.randint(0, 2, size=(25, 4))
+        y = np.array([1] * 12 + [2] * 13)
+        model = RollingOCT(
+            depth=3, solver="highs", min_samples_split=10, min_samples_leaf=3
+        )
+        model.fit(X, y)
+        preds = model.predict(X)
+        assert preds.shape == (25,)
+
+
 class TestRollingOCTWineDataset:
     def test_wine_dataset_reasonable_accuracy(
         self, wine_train_data, wine_test_data

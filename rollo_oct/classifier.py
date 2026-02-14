@@ -13,6 +13,20 @@ from rollo_oct.rolling.optimizer import RollingOptimizer
 logger = logging.getLogger(__name__)
 
 
+def _to_feature_array(X) -> np.ndarray:
+    """Convert feature input to numpy array."""
+    if isinstance(X, pd.DataFrame):
+        return X.values
+    return np.asarray(X)
+
+
+def _to_label_array(y) -> np.ndarray:
+    """Convert label input to numpy array."""
+    if isinstance(y, pd.Series):
+        return y.values
+    return np.asarray(y)
+
+
 class RollingOCT:
     """
     Rolling Optimal Classification Tree classifier.
@@ -37,6 +51,13 @@ class RollingOCT:
         Big-M penalty for empty-leaf feature pairs.
     log_to_console : bool, default=False
         Whether the solver should print logs.
+    min_samples_split : int, default=2
+        Minimum number of samples required at a node to solve a
+        depth-2 subproblem. Nodes with fewer samples are pruned.
+    min_samples_leaf : int, default=1
+        Minimum number of samples required at each leaf node.
+        Feature pairs that would produce a leaf with fewer samples
+        are eliminated from the formulation.
 
     Attributes
     ----------
@@ -66,6 +87,8 @@ class RollingOCT:
         mip_gap: float = None,
         big_m: float = 99,
         log_to_console: bool = False,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
     ):
         if depth < 2:
             raise ValueError("depth must be >= 2")
@@ -76,6 +99,8 @@ class RollingOCT:
         self.mip_gap = mip_gap
         self.big_m = big_m
         self.log_to_console = log_to_console
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
 
         # Validate solver name early
         SolverConfig(solver_name=solver)
@@ -101,11 +126,8 @@ class RollingOCT:
         -------
         self
         """
-        if isinstance(X, pd.DataFrame):
-            X_arr = X.values
-        else:
-            X_arr = np.asarray(X)
-        y_arr = np.asarray(y) if not isinstance(y, pd.Series) else y.values
+        X_arr = _to_feature_array(X)
+        y_arr = _to_label_array(y)
 
         self.features_ = list(range(1, X_arr.shape[1] + 1))
         self.classes_ = sorted(np.unique(y_arr).tolist())
@@ -123,6 +145,8 @@ class RollingOCT:
             mip_gap=self.mip_gap,
             log_to_console=self.log_to_console,
             big_m=self.big_m,
+            min_samples_split=self.min_samples_split,
+            min_samples_leaf=self.min_samples_leaf,
         )
         impurity = get_criterion(self.criterion)
         optimizer = RollingOptimizer(
@@ -153,11 +177,7 @@ class RollingOCT:
         """
         if not self._is_fitted:
             raise RuntimeError("Model has not been fitted. Call fit() first.")
-        if isinstance(X, pd.DataFrame):
-            X_arr = X.values
-        else:
-            X_arr = np.asarray(X)
-        return self.tree_.predict(X_arr)
+        return self.tree_.predict(_to_feature_array(X))
 
     def score(self, X, y) -> float:
         """
@@ -173,5 +193,4 @@ class RollingOCT:
         float: Accuracy (fraction of correct predictions).
         """
         predictions = self.predict(X)
-        y_arr = np.asarray(y) if not isinstance(y, pd.Series) else y.values
-        return float(np.mean(predictions == y_arr))
+        return float(np.mean(predictions == _to_label_array(y)))

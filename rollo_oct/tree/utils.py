@@ -69,12 +69,9 @@ def get_child(current_depth: int, target_depth: int, child_node: int) -> int:
     For even nodes: always goes left (multiply by 2).
     For odd nodes: always goes right (multiply by 2 + 1).
     """
-    counter = 0
-    if target_depth > current_depth:
-        while counter < (target_depth - current_depth):
-            if child_node % 2 == 0:
-                child_node = child_node * 2
-            else:
-                child_node = (child_node * 2) + 1
-            counter += 1
+    for _ in range(target_depth - current_depth):
+        if child_node % 2 == 0:
+            child_node = child_node * 2
+        else:
+            child_node = child_node * 2 + 1
     return child_node

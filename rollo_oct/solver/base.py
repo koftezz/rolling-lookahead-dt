@@ -36,6 +36,12 @@ class SolverConfig:
         mip_gap: Relative MIP optimality gap tolerance (e.g., 0.01 for 1%).
         log_to_console: Whether to print solver output.
         big_m: Penalty for empty-leaf feature pairs in the objective.
+        min_samples_split: Minimum number of datapoints required to solve a
+            subproblem during rolling expansion. Nodes with fewer samples are
+            pruned instead of expanded.
+        min_samples_leaf: Minimum number of datapoints required at each leaf
+            node. Feature pairs that would produce a leaf with fewer samples
+            are eliminated from the OCT-2 formulation.
     """
 
     def __init__(
@@ -45,12 +51,16 @@ class SolverConfig:
         mip_gap: Optional[float] = None,
         log_to_console: bool = False,
         big_m: float = 99,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
     ):
         self.solver_name = solver_name.lower()
         self.time_limit = time_limit
         self.mip_gap = mip_gap
         self.log_to_console = log_to_console
         self.big_m = big_m
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
 
         if self.solver_name not in ("highs", "gurobi", "cbc"):
             raise ValueError(

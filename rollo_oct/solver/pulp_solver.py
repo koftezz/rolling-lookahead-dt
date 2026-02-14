@@ -68,52 +68,78 @@ class PuLPOCT2Solver:
             y_idx=y_idx,
         )
 
+        # Determine which (i,j) pairs to keep based on min_samples_leaf
+        min_leaf = self.config.min_samples_leaf
+        valid_x_pairs = set()
+        valid_y_pairs = set()
+
+        for i in P:
+            left_mask = data_arr[:, i] == 1
+            right_mask = ~left_mask
+            for j in P:
+                # Left subtree leaves: 4 (j=1) and 5 (j=0)
+                n_leaf4 = int(np.sum(left_mask & (data_arr[:, j] == 1)))
+                n_leaf5 = int(np.sum(left_mask & (data_arr[:, j] == 0)))
+                if n_leaf4 >= min_leaf and n_leaf5 >= min_leaf:
+                    valid_x_pairs.add((i, j))
+
+                # Right subtree leaves: 6 (j=1) and 7 (j=0)
+                n_leaf6 = int(np.sum(right_mask & (data_arr[:, j] == 1)))
+                n_leaf7 = int(np.sum(right_mask & (data_arr[:, j] == 0)))
+                if n_leaf6 >= min_leaf and n_leaf7 >= min_leaf:
+                    valid_y_pairs.add((i, j))
+
+        # Fall back to all pairs if elimination removes everything
+        if not valid_x_pairs:
+            valid_x_pairs = {(i, j) for i in P for j in P}
+        if not valid_y_pairs:
+            valid_y_pairs = {(i, j) for i in P for j in P}
+
+        logger.info(
+            f"Variable elimination: {len(valid_x_pairs)}/{len(P)**2} x-pairs, "
+            f"{len(valid_y_pairs)}/{len(P)**2} y-pairs"
+        )
+
         # Build PuLP model
         prob = LpProblem("OCT2", LpMinimize)
 
         x = {
             (i, j): LpVariable(f"x_{i}_{j}", cat="Binary")
-            for i in P
-            for j in P
+            for (i, j) in valid_x_pairs
         }
         y = {
             (i, k): LpVariable(f"y_{i}_{k}", cat="Binary")
-            for i in P
-            for k in P
+            for (i, k) in valid_y_pairs
         }
 
         # Constraint 1: exactly one (i,j) pair for left subtree
-        prob += lpSum(x[i, j] for i in P for j in P) == 1, "one_left_pair"
+        prob += lpSum(x[pair] for pair in valid_x_pairs) == 1, "one_left_pair"
 
         # Constraint 2: exactly one (i,k) pair for right subtree
-        prob += lpSum(y[i, k] for i in P for k in P) == 1, "one_right_pair"
+        prob += lpSum(y[pair] for pair in valid_y_pairs) == 1, "one_right_pair"
 
         # Constraint 3: same root feature for both subtrees
         for i in P:
-            prob += (
-                lpSum(x[i, j] for j in P) == lpSum(y[i, k] for k in P),
-                f"same_root_{i}",
-            )
+            x_sum = lpSum(x[i, j] for j in P if (i, j) in valid_x_pairs)
+            y_sum = lpSum(y[i, k] for k in P if (i, k) in valid_y_pairs)
+            prob += (x_sum == y_sum, f"same_root_{i}")
 
         # Objective: minimize total impurity across all 4 leaves
         big_m = self.config.big_m
         obj = lpSum(
             (coef_dict[4].get((i, j), big_m) + coef_dict[5].get((i, j), big_m))
             * x[i, j]
-            for i in P
-            for j in P
+            for (i, j) in valid_x_pairs
         ) + lpSum(
             (coef_dict[6].get((i, k), big_m) + coef_dict[7].get((i, k), big_m))
             * y[i, k]
-            for i in P
-            for k in P
+            for (i, k) in valid_y_pairs
         )
         prob += obj
 
         # Select and configure solver backend
         solver = self._get_solver()
 
-        # Solve
         logger.info("Solving OCT-2 formulation...")
         prob.solve(solver)
         status_str = LpStatus.get(prob.status, "Undefined")
@@ -123,7 +149,7 @@ class PuLPOCT2Solver:
             return OCT2Solution(status=SolverStatus.INFEASIBLE)
         elif status_str == "Unbounded":
             return OCT2Solution(status=SolverStatus.UNBOUNDED)
-        elif status_str not in ("Optimal",):
+        elif status_str != "Optimal":
             return OCT2Solution(status=SolverStatus.ERROR)
 
         # Extract solution
@@ -131,32 +157,32 @@ class PuLPOCT2Solver:
         left_feature = None
         right_feature = None
 
-        for i in P:
-            for j in P:
-                xval = x[i, j].varValue
-                if xval is not None and xval > 0.5:
-                    root_feature = i
-                    left_feature = j
-                    logger.info(
-                        f"Left split: root feature={i}, second feature={j}"
-                    )
-                yval = y[i, j].varValue
-                if yval is not None and yval > 0.5:
-                    right_feature = j
-                    logger.info(
-                        f"Right split: root feature={i}, second feature={j}"
-                    )
+        for (i, j) in valid_x_pairs:
+            xval = x[i, j].varValue
+            if xval is not None and xval > 0.5:
+                root_feature = i
+                left_feature = j
+                logger.info(
+                    f"Left split: root feature={i}, second feature={j}"
+                )
+                break
+        for (i, k) in valid_y_pairs:
+            yval = y[i, k].varValue
+            if yval is not None and yval > 0.5:
+                root_feature = i
+                right_feature = k
+                logger.info(
+                    f"Right split: root feature={i}, second feature={k}"
+                )
+                break
 
         # Determine leaf classes by majority vote
         leaf_classes = {}
         for leaf in leaf_nodes:
-            first_val = leaf_paths[leaf][0]
-            second_val = leaf_paths[leaf][1]
+            first_val, second_val = leaf_paths[leaf]
             arr = data_arr[np.where(data_arr[:, root_feature] == first_val)]
-            if leaf in [4, 5]:
-                arr2 = arr[np.where(arr[:, left_feature] == second_val)]
-            else:
-                arr2 = arr[np.where(arr[:, right_feature] == second_val)]
+            subtree_feature = left_feature if first_val == 1 else right_feature
+            arr2 = arr[np.where(arr[:, subtree_feature] == second_val)]
             if len(arr2) > 0:
                 values, counts = np.unique(arr2[:, y_idx], return_counts=True)
                 leaf_classes[leaf] = values[np.argmax(counts)]

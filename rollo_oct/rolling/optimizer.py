@@ -6,7 +6,6 @@ depth-2 subtrees at each parent, and merges results back. Repeats
 level-by-level until the target depth is reached.
 """
 
-import copy
 import logging
 import time
 from dataclasses import dataclass
@@ -51,23 +50,8 @@ def _parents_of_nodes(go_deep_nodes: dict) -> dict:
     parents = {}
     for node_id in go_deep_nodes:
         parent = node_id // 2
-        if parent not in parents:
-            parents[parent] = []
-        parents[parent].append(node_id)
+        parents.setdefault(parent, []).append(node_id)
     return parents
-
-
-def _find_misclassified_leaves(data: pd.DataFrame) -> list:
-    """Find leaf IDs where the prediction column disagrees with 'y'.
-
-    Returns leaf IDs that have more than one unique class in the routed samples.
-    """
-    return list(
-        data.loc[
-            data.groupby("leaf")["y"].transform(lambda x: x.nunique() > 1),
-            "leaf",
-        ].unique()
-    )
 
 
 class RollingOptimizer:
@@ -197,12 +181,12 @@ class RollingOptimizer:
         # to_go_deep_nodes: maps current_leaf_id -> original_subtree_leaf_id
         to_go_deep_nodes = {i: i for i in initial_misclassified}
 
-        # pruned_nodes: leaves that won't be expanded
-        pruned_node_ids = set()
-        for lid in leaf_nodes_path:
-            if lid not in to_go_deep_nodes:
-                pruned_node_ids.add(lid)
-                tree.prune_leaf(lid)
+        # Prune leaves that won't be expanded
+        pruned_node_ids = {
+            lid for lid in leaf_nodes_path if lid not in to_go_deep_nodes
+        }
+        for lid in pruned_node_ids:
+            tree.prune_leaf(lid)
 
         new_train_data_dict = {}
 
@@ -225,40 +209,48 @@ class RollingOptimizer:
 
                 # Extract the data subset for this parent's region
                 if level == 1:
-                    first_var = leaf_nodes_path[leaf_ids[0]][0]
-                    root_feat_idx = sub_features[1]  # root feature
-                    arr = df_arr[
-                        np.where(df_arr[:, root_feat_idx] == first_var)
-                    ]
-                    sub_K = list(np.unique(arr[:, y_idx]))
-                    cols = list(features).copy()
-                    cols.insert(y_idx, "y")
-                    new_train_data_dict[parent_node] = pd.DataFrame(
-                        arr, columns=cols, index=None
-                    )
+                    source_arr = df_arr
+                    leaf_key = leaf_ids[0]
                 else:
-                    parent_data = new_train_data_dict[grandparent]
-                    arr = np.array(parent_data)
-                    first_var = leaf_nodes_path[
-                        to_go_deep_nodes[leaf_ids[0]]
-                    ][0]
-                    root_feat_idx = sub_features[1]
-                    arr = arr[np.where(arr[:, root_feat_idx] == first_var)]
-                    sub_K = list(np.unique(arr[:, y_idx]))
-                    cols = list(features).copy()
-                    cols.insert(y_idx, "y")
-                    new_train_data_dict[parent_node] = pd.DataFrame(
-                        arr, columns=cols, index=None
-                    )
+                    source_arr = np.array(new_train_data_dict[grandparent])
+                    leaf_key = to_go_deep_nodes[leaf_ids[0]]
+
+                first_var = leaf_nodes_path[leaf_key][0]
+                root_feat_idx = sub_features[1]
+                arr = source_arr[
+                    np.where(source_arr[:, root_feat_idx] == first_var)
+                ]
+                sub_K = list(np.unique(arr[:, y_idx]))
+                cols = list(features).copy()
+                cols.insert(y_idx, "y")
+                new_train_data_dict[parent_node] = pd.DataFrame(
+                    arr, columns=cols, index=None
+                )
+
+                parent_data = new_train_data_dict[parent_node]
+                n_samples = len(parent_data)
 
                 logger.info(
                     f"Processing parent node {parent_node}, "
-                    f"leaves {leaf_ids}, level {level}"
+                    f"leaves {leaf_ids}, level {level}, "
+                    f"samples={n_samples}"
                 )
+
+                # Early stopping: skip if too few samples to split
+                if n_samples < self.solver_config.min_samples_split:
+                    logger.info(
+                        f"Skipping parent {parent_node}: "
+                        f"{n_samples} samples "
+                        f"< min_samples_split={self.solver_config.min_samples_split}"
+                    )
+                    for lid in leaf_ids:
+                        pruned_node_ids.add(lid)
+                        tree.prune_leaf(lid)
+                    continue
 
                 # Solve depth-2 subproblem for this parent's data
                 sub_solution = self._oct2_solver.solve(
-                    data=new_train_data_dict[parent_node],
+                    data=parent_data,
                     features=features,
                     classes=sub_K,
                     y_idx=y_idx,
@@ -285,16 +277,14 @@ class RollingOptimizer:
                 for lid, cls in sub_solution.leaf_classes.items():
                     sub_tree.set_leaf_class(lid, cls)
 
-                sub_X = np.array(new_train_data_dict[parent_node][features])
-                sub_y = np.array(
-                    new_train_data_dict[parent_node].iloc[:, y_idx]
-                )
+                sub_X = np.array(parent_data[features])
+                sub_y = np.array(parent_data.iloc[:, y_idx])
                 sub_misclassified = sub_tree.get_misclassified_leaves(
                     sub_X, sub_y
                 )
 
                 # Merge subtree into main tree
-                _, sub_leaf_nodes = generate_nodes(self.BASE_DEPTH)
+                sub_parents, sub_leaf_nodes = generate_nodes(self.BASE_DEPTH)
                 sub_feats = {
                     1: sub_solution.root_feature,
                     2: sub_solution.left_feature,
@@ -302,7 +292,6 @@ class RollingOptimizer:
                 }
 
                 # Map subtree parents to global IDs and set branch features
-                sub_parents, _ = generate_nodes(self.BASE_DEPTH)
                 for sub_p in sub_parents:
                     global_id = parent_pattern(sub_p, parent_node)
                     tree.set_branch_feature(global_id, sub_feats[sub_p])
@@ -329,11 +318,8 @@ class RollingOptimizer:
                     pruned_node_ids.discard(child_id)
                     tree._pruned_node_ids.discard(child_id)
 
-                # Fix pruned nodes: if a parent is being re-optimized,
-                # its children should be unpruned (they're now internal nodes)
-                # BUG FIX: Original code had `not (A or B)` which was always False.
-                # The correct logic is to unprune nodes that are direct children
-                # or grandchildren of parents being optimized.
+                # Unprune children and grandchildren of parents being
+                # re-optimized, since they are now internal nodes.
                 nodes_to_unprune = set()
                 for pnode in parents_to_optimize:
                     nodes_to_unprune.add(pnode * 2)
@@ -349,13 +335,14 @@ class RollingOptimizer:
                 selected_features[parent_node] = sub_feats
 
                 # Clean prediction columns from cached data
-                cached = new_train_data_dict[parent_node]
-                for col in ["prediction", "leaf"]:
-                    if col in cached.columns:
-                        new_train_data_dict[parent_node] = cached.drop(
-                            col, axis=1
-                        )
-                        cached = new_train_data_dict[parent_node]
+                cols_to_drop = [
+                    col for col in ["prediction", "leaf"]
+                    if col in parent_data.columns
+                ]
+                if cols_to_drop:
+                    new_train_data_dict[parent_node] = parent_data.drop(
+                        columns=cols_to_drop
+                    )
 
             # Update tree depth for this level
             current_depth = self.BASE_DEPTH + level
@@ -385,3 +372,6 @@ class RollingOptimizer:
             )
 
             to_go_deep_nodes = next_go_deep
+            if not to_go_deep_nodes:
+                logger.info("No misclassified leaves remain. Stopping early.")
+                break
