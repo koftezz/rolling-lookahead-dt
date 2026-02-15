@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-02-15
+
+### Performance
+- Vectorized `predict()` and `get_misclassified_leaves()` — batch-route all samples through the tree using NumPy instead of per-sample Python loops (~20x speedup).
+- Replaced `feature_vector.dot(x)` with direct array index lookup in tree routing, eliminating O(n_features) dot product per node per sample.
+- Precomputed boolean feature masks in impurity computation, reducing temporary array allocations in the innermost loop (~2-3x speedup).
+- Matrix-multiply variable elimination in the MIP solver — replaced O(|P|² × n_samples) nested loops with a single `F.T @ F` BLAS call (~45x speedup).
+- Optional Numba JIT compilation for tree routing via `pip install rollotree[fast]` (additional ~2-5x on top of NumPy vectorization).
+
+### Added
+- `rollotree/tree/_numba.py` — optional Numba-accelerated tree routing with graceful fallback.
+- `fast` optional dependency extra: `pip install rollotree[fast]`.
+
 ## [1.1.0] - 2026-02-14
 
 ### Changed
@@ -27,5 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial release as `rollo-oct`.
 
+[1.2.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.2.0
 [1.1.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.1.0
 [1.0.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.0.0

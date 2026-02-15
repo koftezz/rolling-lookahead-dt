@@ -69,25 +69,11 @@ class PuLPOCT2Solver:
         )
 
         # Determine which (i,j) pairs to keep based on min_samples_leaf
+        # Uses matrix multiply to compute all co-occurrence counts at once
         min_leaf = self.config.min_samples_leaf
-        valid_x_pairs = set()
-        valid_y_pairs = set()
-
-        for i in P:
-            left_mask = data_arr[:, i] == 1
-            right_mask = ~left_mask
-            for j in P:
-                # Left subtree leaves: 4 (j=1) and 5 (j=0)
-                n_leaf4 = int(np.sum(left_mask & (data_arr[:, j] == 1)))
-                n_leaf5 = int(np.sum(left_mask & (data_arr[:, j] == 0)))
-                if n_leaf4 >= min_leaf and n_leaf5 >= min_leaf:
-                    valid_x_pairs.add((i, j))
-
-                # Right subtree leaves: 6 (j=1) and 7 (j=0)
-                n_leaf6 = int(np.sum(right_mask & (data_arr[:, j] == 1)))
-                n_leaf7 = int(np.sum(right_mask & (data_arr[:, j] == 0)))
-                if n_leaf6 >= min_leaf and n_leaf7 >= min_leaf:
-                    valid_y_pairs.add((i, j))
+        valid_x_pairs, valid_y_pairs = self._compute_valid_pairs(
+            data_arr, P, min_leaf
+        )
 
         # Fall back to all pairs if elimination removes everything
         if not valid_x_pairs:
@@ -202,6 +188,47 @@ class PuLPOCT2Solver:
             runtime=runtime,
             mip_gap=None,
         )
+
+    @staticmethod
+    def _compute_valid_pairs(data_arr, features, min_leaf):
+        """Vectorized variable elimination using matrix operations.
+
+        Replaces O(|P|^2 * n_samples) Python loops with a single matrix
+        multiply to compute all co-occurrence counts simultaneously.
+        """
+        # Extract binary feature columns as a float matrix for matmul
+        F = data_arr[:, features].astype(np.float64)  # (n_samples, n_features)
+        n = F.shape[0]
+
+        # F.T @ F gives count(fi==1 AND fj==1) for all (i,j) pairs
+        FT_F = F.T @ F  # (n_features, n_features)
+        col_sums = F.sum(axis=0)  # count(fi==1) for each feature
+
+        # Derive all four leaf counts from the co-occurrence matrix:
+        # Left subtree (fi==1):
+        #   leaf4: fi==1 AND fj==1 = FT_F[i,j]
+        #   leaf5: fi==1 AND fj==0 = col_sums[i] - FT_F[i,j]
+        left_both_1 = FT_F
+        left_fi1_fj0 = col_sums[:, None] - FT_F
+
+        # Right subtree (fi==0):
+        #   leaf6: fi==0 AND fj==1 = col_sums[j] - FT_F[i,j]
+        #   leaf7: fi==0 AND fj==0 = n - col_sums[i] - col_sums[j] + FT_F[i,j]
+        right_fi0_fj1 = col_sums[None, :] - FT_F
+        right_both_0 = n - col_sums[:, None] - col_sums[None, :] + FT_F
+
+        # Valid pairs: both leaves in the subtree meet min_leaf threshold
+        valid_x_mask = (left_both_1 >= min_leaf) & (left_fi1_fj0 >= min_leaf)
+        valid_y_mask = (right_fi0_fj1 >= min_leaf) & (right_both_0 >= min_leaf)
+
+        # Convert boolean matrices to sets of (feature_i, feature_j)
+        x_rows, x_cols = np.where(valid_x_mask)
+        y_rows, y_cols = np.where(valid_y_mask)
+
+        valid_x_pairs = {(features[i], features[j]) for i, j in zip(x_rows, x_cols)}
+        valid_y_pairs = {(features[i], features[j]) for i, j in zip(y_rows, y_cols)}
+
+        return valid_x_pairs, valid_y_pairs
 
     def _get_solver(self):
         """Instantiate the PuLP solver backend based on config."""

@@ -4,6 +4,47 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 
+def _precompute_leaf_subsets(data, features, leaf_paths, leaf_nodes, y_idx):
+    """Precompute boolean masks and class labels for all (leaf, fi, fj) combos.
+
+    Instead of nested np.where calls that create temporary arrays each time,
+    precompute feature masks once and combine them with bitwise operations.
+
+    Returns:
+        Dict of {leaf_id: {(fi, fj): (count, class_counts_array)}}
+        where class_counts_array maps class_label -> count.
+    """
+    n_samples = len(data)
+    features_arr = np.array(features)
+
+    # Precompute boolean masks: mask_eq1[fi] = (data[:, fi] == 1)
+    mask_eq1 = {}
+    mask_eq0 = {}
+    for fi in features:
+        mask_eq1[fi] = data[:, fi] == 1
+        mask_eq0[fi] = ~mask_eq1[fi]
+
+    y_col = data[:, y_idx]
+
+    result = {}
+    for leaf in leaf_nodes:
+        first_val = leaf_paths[leaf][0]
+        second_val = leaf_paths[leaf][1]
+        leaf_data = {}
+
+        for fi in features:
+            fi_mask = mask_eq1[fi] if first_val == 1 else mask_eq0[fi]
+            for fj in features:
+                fj_mask = mask_eq1[fj] if second_val == 1 else mask_eq0[fj]
+                combined = fi_mask & fj_mask
+                count = int(np.sum(combined))
+                if count > 0:
+                    leaf_data[(fi, fj)] = (count, y_col[combined])
+        result[leaf] = leaf_data
+
+    return result, n_samples
+
+
 class ImpurityCriterion(ABC):
     """Abstract base class for impurity calculation strategies."""
 
@@ -42,18 +83,20 @@ class GiniCriterion(ImpurityCriterion):
 
     def compute_leaf_coefficients(self, data, features, leaf_nodes,
                                   leaf_paths, classes, y_idx=0):
-        n = len(data)
+        subsets, n = _precompute_leaf_subsets(
+            data, features, leaf_paths, leaf_nodes, y_idx
+        )
+        classes_arr = np.array(classes)
         result = {}
         for leaf in leaf_nodes:
             temp = {}
-            first_val = leaf_paths[leaf][0]
-            second_val = leaf_paths[leaf][1]
-            for fi in features:
-                arr = data[np.where(data[:, fi] == first_val)]
-                for fj in features:
-                    arr2 = arr[np.where(arr[:, fj] == second_val)]
-                    if len(arr2) > 0:
-                        temp[(fi, fj)] = self._gini_index(arr2, n, classes, y_idx)
+            for (fi, fj), (count, y_subset) in subsets[leaf].items():
+                # Vectorized Gini: count occurrences of each class at once
+                sum_sq = 0.0
+                for k in classes_arr:
+                    p = np.sum(y_subset == k) / count
+                    sum_sq += p * p
+                temp[(fi, fj)] = (count / n) * (1.0 - sum_sq)
             result[leaf] = temp
         return result
 
@@ -72,19 +115,15 @@ class MisclassificationCriterion(ImpurityCriterion):
 
     def compute_leaf_coefficients(self, data, features, leaf_nodes,
                                   leaf_paths, classes=None, y_idx=0):
+        subsets, n = _precompute_leaf_subsets(
+            data, features, leaf_paths, leaf_nodes, y_idx
+        )
         result = {}
         for leaf in leaf_nodes:
             temp = {}
-            first_val = leaf_paths[leaf][0]
-            second_val = leaf_paths[leaf][1]
-            for fi in features:
-                arr = data[np.where(data[:, fi] == first_val)]
-                for fj in features:
-                    arr2 = arr[np.where(arr[:, fj] == second_val)]
-                    if len(arr2) > 0:
-                        values, counts = np.unique(arr2[:, y_idx],
-                                                   return_counts=True)
-                        temp[(fi, fj)] = len(arr2) - counts.max()
+            for (fi, fj), (count, y_subset) in subsets[leaf].items():
+                _values, counts = np.unique(y_subset, return_counts=True)
+                temp[(fi, fj)] = count - counts.max()
             result[leaf] = temp
         return result
 
