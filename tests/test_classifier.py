@@ -167,6 +167,71 @@ class TestEarlyStopping:
         assert preds.shape == (25,)
 
 
+class TestParallelExecution:
+    """Tests for n_jobs > 1 producing identical results to sequential."""
+
+    def test_n_jobs_parameter_accepted(self):
+        model = RollingOCT(n_jobs=2)
+        assert model.n_jobs == 2
+
+    def test_n_jobs_minus_one_accepted(self):
+        model = RollingOCT(n_jobs=-1)
+        assert model.n_jobs == -1
+
+    def test_n_jobs_default_is_one(self):
+        model = RollingOCT()
+        assert model.n_jobs == 1
+
+    def test_parallel_matches_sequential_depth3(self):
+        """n_jobs=2 should produce the exact same tree as n_jobs=1."""
+        X, y = _make_X_y(n=40, n_features=5, seed=42)
+
+        model_seq = RollingOCT(depth=3, solver="highs", n_jobs=1)
+        model_seq.fit(X, y)
+
+        model_par = RollingOCT(depth=3, solver="highs", n_jobs=2)
+        model_par.fit(X, y)
+
+        np.testing.assert_array_equal(model_seq.predict(X), model_par.predict(X))
+        assert model_seq.score(X, y) == model_par.score(X, y)
+        assert model_seq.tree_.get_var_a_dict() == model_par.tree_.get_var_a_dict()
+        assert (
+            model_seq.tree_.get_target_class_dict()
+            == model_par.tree_.get_target_class_dict()
+        )
+
+    def test_parallel_matches_sequential_depth4(self):
+        """Deeper tree with more parents to parallelize."""
+        X, y = _make_X_y(n=60, n_features=5, seed=42)
+
+        model_seq = RollingOCT(depth=4, solver="highs", n_jobs=1, time_limit=60)
+        model_seq.fit(X, y)
+
+        model_par = RollingOCT(depth=4, solver="highs", n_jobs=-1, time_limit=60)
+        model_par.fit(X, y)
+
+        np.testing.assert_array_equal(model_seq.predict(X), model_par.predict(X))
+
+    def test_parallel_with_misclassification_criterion(self):
+        X, y = _make_X_y(n=40, n_features=5, seed=42)
+
+        model_seq = RollingOCT(depth=3, criterion="misclassification", n_jobs=1)
+        model_seq.fit(X, y)
+
+        model_par = RollingOCT(depth=3, criterion="misclassification", n_jobs=2)
+        model_par.fit(X, y)
+
+        np.testing.assert_array_equal(model_seq.predict(X), model_par.predict(X))
+
+    def test_parallel_depth2_no_expansion(self):
+        """At depth=2 there is no rolling expansion, n_jobs should be irrelevant."""
+        X, y = _make_X_y(n=30, n_features=5)
+        model = RollingOCT(depth=2, solver="highs", n_jobs=4)
+        model.fit(X, y)
+        preds = model.predict(X)
+        assert len(preds) == len(X)
+
+
 class TestRollingOCTWineDataset:
     def test_wine_dataset_reasonable_accuracy(
         self, wine_train_data, wine_test_data

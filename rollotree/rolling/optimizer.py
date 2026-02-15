@@ -8,6 +8,7 @@ level-by-level until the target depth is reached.
 
 import logging
 import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +25,12 @@ from rollotree.tree.utils import (
 )
 from rollotree.solver.base import SolverConfig, SolverStatus, OCT2Solution
 from rollotree.solver.pulp_solver import PuLPOCT2Solver
+from rollotree.rolling.parallel import (
+    SubproblemInput,
+    SubproblemResult,
+    _solve_subproblem,
+    _resolve_n_jobs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +71,15 @@ class RollingOptimizer:
 
     BASE_DEPTH = 2
 
-    def __init__(self, solver_config: SolverConfig, criterion: ImpurityCriterion):
+    def __init__(
+        self,
+        solver_config: SolverConfig,
+        criterion: ImpurityCriterion,
+        n_jobs: int = 1,
+    ):
         self.solver_config = solver_config
         self.criterion = criterion
+        self.n_jobs = n_jobs
         self._oct2_solver = PuLPOCT2Solver(
             config=solver_config, criterion=criterion
         )
@@ -200,6 +213,8 @@ class RollingOptimizer:
 
             parents_to_optimize = _parents_of_nodes(to_go_deep_nodes)
 
+            # ── Phase A: build subproblem inputs (sequential) ──
+            inputs = []
             for parent_node in parents_to_optimize:
                 leaf_ids = parents_to_optimize[parent_node]
 
@@ -223,39 +238,52 @@ class RollingOptimizer:
                 sub_K = list(np.unique(arr[:, y_idx]))
                 cols = list(features).copy()
                 cols.insert(y_idx, "y")
-                new_train_data_dict[parent_node] = pd.DataFrame(
-                    arr, columns=cols, index=None
-                )
-
-                parent_data = new_train_data_dict[parent_node]
-                n_samples = len(parent_data)
+                parent_data = pd.DataFrame(arr, columns=cols, index=None)
+                new_train_data_dict[parent_node] = parent_data
 
                 logger.info(
                     f"Processing parent node {parent_node}, "
                     f"leaves {leaf_ids}, level {level}, "
-                    f"samples={n_samples}"
+                    f"samples={len(parent_data)}"
                 )
 
-                # Early stopping: skip if too few samples to split
-                if n_samples < self.solver_config.min_samples_split:
+                inputs.append(SubproblemInput(
+                    parent_node=parent_node,
+                    leaf_ids=leaf_ids,
+                    parent_data=parent_data,
+                    features=features,
+                    sub_K=sub_K,
+                    y_idx=y_idx,
+                    solver_config=self.solver_config,
+                    criterion=self.criterion,
+                ))
+
+            # ── Phase B: solve subproblems (parallel or sequential) ──
+            effective_jobs = _resolve_n_jobs(self.n_jobs)
+            if effective_jobs > 1 and len(inputs) > 1:
+                with ProcessPoolExecutor(max_workers=effective_jobs) as pool:
+                    results_list = list(pool.map(_solve_subproblem, inputs))
+            else:
+                results_list = [_solve_subproblem(inp) for inp in inputs]
+
+            # ── Phase C: merge results into the tree (sequential) ──
+            for result in results_list:
+                parent_node = result.parent_node
+                leaf_ids = result.leaf_ids
+
+                if result.skipped:
                     logger.info(
                         f"Skipping parent {parent_node}: "
-                        f"{n_samples} samples "
-                        f"< min_samples_split={self.solver_config.min_samples_split}"
+                        f"{result.n_samples} samples "
+                        f"< min_samples_split="
+                        f"{self.solver_config.min_samples_split}"
                     )
                     for lid in leaf_ids:
                         pruned_node_ids.add(lid)
                         tree.prune_leaf(lid)
                     continue
 
-                # Solve depth-2 subproblem for this parent's data
-                sub_solution = self._oct2_solver.solve(
-                    data=parent_data,
-                    features=features,
-                    classes=sub_K,
-                    y_idx=y_idx,
-                )
-
+                sub_solution = result.sub_solution
                 if sub_solution.status not in (
                     SolverStatus.OPTIMAL,
                     SolverStatus.TIME_LIMIT,
@@ -266,23 +294,6 @@ class RollingOptimizer:
                     )
                     continue
 
-                # Predict on the subproblem data to find which sub-leaves
-                # are still misclassified
-                sub_tree = DecisionTree(
-                    depth=self.BASE_DEPTH, features=features
-                )
-                sub_tree.set_branch_feature(1, sub_solution.root_feature)
-                sub_tree.set_branch_feature(2, sub_solution.left_feature)
-                sub_tree.set_branch_feature(3, sub_solution.right_feature)
-                for lid, cls in sub_solution.leaf_classes.items():
-                    sub_tree.set_leaf_class(lid, cls)
-
-                sub_X = np.array(parent_data[features])
-                sub_y = np.array(parent_data.iloc[:, y_idx])
-                sub_misclassified = sub_tree.get_misclassified_leaves(
-                    sub_X, sub_y
-                )
-
                 # Merge subtree into main tree
                 sub_parents, sub_leaf_nodes = generate_nodes(self.BASE_DEPTH)
                 sub_feats = {
@@ -291,12 +302,10 @@ class RollingOptimizer:
                     3: sub_solution.right_feature,
                 }
 
-                # Map subtree parents to global IDs and set branch features
                 for sub_p in sub_parents:
                     global_id = parent_pattern(sub_p, parent_node)
                     tree.set_branch_feature(global_id, sub_feats[sub_p])
 
-                # Map subtree leaves to global IDs and set classes
                 for sub_leaf in sub_leaf_nodes:
                     global_leaf_id = leaf_pattern(
                         sub_leaf, self.BASE_DEPTH, parent_node
@@ -306,35 +315,21 @@ class RollingOptimizer:
                             global_leaf_id,
                             sub_solution.leaf_classes[sub_leaf],
                         )
-                        if sub_leaf in sub_misclassified:
+                        if sub_leaf in result.sub_misclassified:
                             next_go_deep[global_leaf_id] = sub_leaf
                         else:
                             pruned_node_ids.add(global_leaf_id)
                             tree.prune_leaf(global_leaf_id)
 
-                # Remove old leaf entries that are now branch nodes
                 for child_id in [parent_node * 2, parent_node * 2 + 1]:
                     tree.leaf_nodes.pop(child_id, None)
                     pruned_node_ids.discard(child_id)
                     tree._pruned_node_ids.discard(child_id)
 
-                # Unprune children and grandchildren of parents being
-                # re-optimized, since they are now internal nodes.
-                nodes_to_unprune = set()
-                for pnode in parents_to_optimize:
-                    nodes_to_unprune.add(pnode * 2)
-                    nodes_to_unprune.add(pnode * 2 + 1)
-                    grandchild = get_child(1, 2, pnode)
-                    nodes_to_unprune.add(grandchild * 2)
-                    nodes_to_unprune.add(grandchild * 2 + 1)
-                pruned_node_ids -= nodes_to_unprune
-                for nid in nodes_to_unprune:
-                    tree.unprune_leaf(nid)
-
-                # Store selected features for this expansion
                 selected_features[parent_node] = sub_feats
 
                 # Clean prediction columns from cached data
+                parent_data = result.parent_data
                 cols_to_drop = [
                     col for col in ["prediction", "leaf"]
                     if col in parent_data.columns
@@ -343,6 +338,19 @@ class RollingOptimizer:
                     new_train_data_dict[parent_node] = parent_data.drop(
                         columns=cols_to_drop
                     )
+
+            # Unprune children and grandchildren of parents being
+            # re-optimized (once per level, after all merges).
+            nodes_to_unprune = set()
+            for pnode in parents_to_optimize:
+                nodes_to_unprune.add(pnode * 2)
+                nodes_to_unprune.add(pnode * 2 + 1)
+                grandchild = get_child(1, 2, pnode)
+                nodes_to_unprune.add(grandchild * 2)
+                nodes_to_unprune.add(grandchild * 2 + 1)
+            pruned_node_ids -= nodes_to_unprune
+            for nid in nodes_to_unprune:
+                tree.unprune_leaf(nid)
 
             # Update tree depth for this level
             current_depth = self.BASE_DEPTH + level
