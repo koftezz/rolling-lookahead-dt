@@ -58,6 +58,12 @@ class RollingOCT:
         Minimum number of samples required at each leaf node.
         Feature pairs that would produce a leaf with fewer samples
         are eliminated from the formulation.
+    n_jobs : int, default=1
+        Number of parallel processes for solving OCT-2 subproblems
+        during rolling expansion.
+        1 = sequential (no multiprocessing overhead),
+        -1 = use all available CPU cores,
+        N = use N processes.
 
     Attributes
     ----------
@@ -89,6 +95,7 @@ class RollingOCT:
         log_to_console: bool = False,
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
+        n_jobs: int = 1,
     ):
         if depth < 2:
             raise ValueError("depth must be >= 2")
@@ -101,6 +108,7 @@ class RollingOCT:
         self.log_to_console = log_to_console
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
+        self.n_jobs = n_jobs
 
         # Validate solver name early
         SolverConfig(solver_name=solver)
@@ -150,7 +158,7 @@ class RollingOCT:
         )
         impurity = get_criterion(self.criterion)
         optimizer = RollingOptimizer(
-            solver_config=solver_config, criterion=impurity
+            solver_config=solver_config, criterion=impurity, n_jobs=self.n_jobs
         )
 
         self.tree_, self.depth_results_ = optimizer.build_tree(

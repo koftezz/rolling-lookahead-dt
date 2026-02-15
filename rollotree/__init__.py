@@ -4,7 +4,7 @@ Implements the "Rolling Lookahead Learning for Optimal Classification Trees"
 algorithm using PuLP for solver-agnostic optimization (HiGHS or Gurobi).
 """
 
-__version__ = "1.1.0"
+__version__ = "1.3.0"
 
 from rollotree.classifier import RollingOCT
 from rollotree.solver.base import SolverConfig, SolverStatus

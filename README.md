@@ -17,6 +17,7 @@ RolloTree builds interpretable decision trees by solving a sequence of small mix
 - **sklearn-style API** — `fit()` / `predict()` / `score()`
 - **Two impurity criteria** — Gini index or misclassification error
 - **Arbitrary depth** — depth-2 base tree extended via rolling subtree optimization
+- **Parallel solving** — `n_jobs=-1` to solve independent subproblems across CPU cores
 
 ## Installation
 
@@ -67,6 +68,26 @@ model.fit(X_train, y_train)
 print(f"Test accuracy: {model.score(X_test, y_test):.3f}")
 ```
 
+### Parallel Execution
+
+For deeper trees on larger datasets, use `n_jobs` to solve independent
+subproblems in parallel:
+
+```python
+# Use all CPU cores for parallel subproblem solving
+model = RollingOCT(depth=5, solver="highs", n_jobs=-1)
+model.fit(X_train, y_train)
+
+# Or specify an exact number of workers
+model = RollingOCT(depth=5, solver="highs", n_jobs=4)
+model.fit(X_train, y_train)
+```
+
+The rolling expansion at each depth level solves independent OCT-2 MIP
+subproblems for each parent node. With `n_jobs > 1` these are dispatched
+across processes via `ProcessPoolExecutor`. Speedup scales with the number
+of parents per level — most effective at depth 4+.
+
 ## API Reference
 
 ### `RollingOCT`
@@ -82,6 +103,7 @@ RollingOCT(
     log_to_console=False,
     min_samples_split=2,  # Min samples to solve a subproblem
     min_samples_leaf=1,   # Min samples per leaf node
+    n_jobs=1,             # Parallel workers: 1=sequential, -1=all cores
 )
 ```
 
@@ -145,11 +167,13 @@ rollotree/
         pulp_solver.py       # PuLPOCT2Solver (HiGHS / Gurobi / CBC)
     rolling/
         optimizer.py         # RollingOptimizer, DepthResult
+        parallel.py          # Multiprocessing worker for subproblem solving
     preprocessing/
         helpers.py           # Data binarization and preprocessing
     data/
         train.csv, test.csv  # Example Wine dataset
-tests/                       # 75+ pytest test cases
+tests/                       # 90+ pytest test cases
+benchmarks/                  # Performance benchmarks
 examples/                    # Jupyter notebooks
 ```
 

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-02-15
+
+### Added
+- `n_jobs` parameter on `RollingOCT` for parallel solving of independent OCT-2 subproblems during rolling expansion via `concurrent.futures.ProcessPoolExecutor`.
+- `rollotree/rolling/parallel.py` — worker function and data classes for process-safe subproblem dispatch.
+- `benchmarks/bench_parallel.py` — wall-clock benchmark comparing sequential vs parallel execution.
+
+### Performance
+- At depth 4+ on larger datasets (e.g. wdbc, 512 samples / 300 features), `n_jobs=-1` yields 13-22% wall-clock speedup. Speedup scales with the number of independent parent nodes per level and the per-subproblem solve time.
+
+### Changed
+- Refactored `_rolling_expand()` inner loop into three phases (build inputs → parallel solve → sequential merge) for cleaner separation of concerns.
+- Moved the unprune block from per-parent to once-per-level execution (idempotent, no behavior change).
+
 ## [1.2.0] - 2026-02-15
 
 ### Performance
@@ -40,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial release as `rollo-oct`.
 
+[1.3.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.3.0
 [1.2.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.2.0
 [1.1.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.1.0
 [1.0.0]: https://github.com/koftezz/rolling-lookahead-dt/releases/tag/v1.0.0
