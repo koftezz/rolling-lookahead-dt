@@ -32,6 +32,12 @@ pip install -e ".[dev]"
 
 Dependencies: `pulp`, `highspy`, `numpy`, `pandas`.
 
+For faster prediction and tree building with [Numba](https://numba.pydata.org/) JIT compilation:
+
+```bash
+pip install "rollotree[fast]"
+```
+
 To use the Gurobi solver backend:
 
 ```bash
@@ -133,6 +139,7 @@ rollotree/
         nodes.py             # DecisionNode, LeafNode, DecisionTree
         impurity.py          # GiniCriterion, MisclassificationCriterion
         utils.py             # Node generation, index mapping helpers
+        _numba.py            # Optional Numba-accelerated tree routing
     solver/
         base.py              # SolverStatus, OCT2Solution, SolverConfig
         pulp_solver.py       # PuLPOCT2Solver (HiGHS / Gurobi / CBC)
@@ -142,7 +149,7 @@ rollotree/
         helpers.py           # Data binarization and preprocessing
     data/
         train.csv, test.csv  # Example Wine dataset
-tests/                       # 70 pytest test cases
+tests/                       # 75+ pytest test cases
 examples/                    # Jupyter notebooks
 ```
 
