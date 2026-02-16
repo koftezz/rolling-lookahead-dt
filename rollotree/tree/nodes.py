@@ -1,8 +1,9 @@
 """Decision tree node classes and tree structure."""
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Dict
 import numpy as np
+from scipy import sparse
 
 from rollotree.tree.utils import generate_nodes, leaf_pattern, parent_pattern
 from rollotree.tree._numba import HAS_NUMBA, _predict_batch_numba
@@ -38,6 +39,7 @@ class LeafNode:
     node_id: int
     predicted_class: Optional[int] = None
     is_pruned: bool = False
+    class_distribution: Optional[Dict] = field(default=None, repr=False)
 
     @property
     def parent_id(self) -> int:
@@ -255,6 +257,167 @@ class DecisionTree:
             self._pruned_node_ids.discard(child_id)
 
         return leaf_id_map
+
+    # ── Inspection utilities ─────────────────────────────────────────
+
+    def apply(self, X: np.ndarray) -> np.ndarray:
+        """Return leaf node IDs for each sample.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples,) with integer leaf node IDs.
+        """
+        return self._route_all_to_leaves(X)
+
+    def decision_path(self, X: np.ndarray) -> sparse.csr_matrix:
+        """Return a sparse matrix indicating nodes each sample traverses.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+
+        Returns
+        -------
+        scipy.sparse.csr_matrix of shape (n_samples, max_node_id + 1)
+            Entry (i, j) is 1 if sample i passes through node j.
+        """
+        n = X.shape[0]
+        all_node_ids = (
+            set(self.branch_nodes.keys()) | set(self.leaf_nodes.keys())
+        )
+        max_node_id = max(all_node_ids) if all_node_ids else 1
+
+        rows, cols = [], []
+        for i in range(n):
+            t = 1
+            d = 0
+            rows.append(i)
+            cols.append(t)
+            while d < self.depth:
+                node = self.branch_nodes.get(t)
+                if node is None or node.feature_vector is None:
+                    break
+                if X[i, node.feature_position] == 1:
+                    t = t * 2
+                else:
+                    t = t * 2 + 1
+                d += 1
+                rows.append(i)
+                cols.append(t)
+                if t in self._pruned_node_ids:
+                    break
+
+        data = np.ones(len(rows), dtype=np.int8)
+        return sparse.csr_matrix(
+            (data, (rows, cols)), shape=(n, max_node_id + 1)
+        )
+
+    def get_n_leaves(self) -> int:
+        """Return the number of active (non-pruned) leaf nodes."""
+        return sum(
+            1 for leaf in self.leaf_nodes.values()
+            if not leaf.is_pruned and leaf.predicted_class is not None
+        )
+
+    def get_depth(self) -> int:
+        """Return the actual depth of the deepest active path."""
+        max_depth = 0
+        for lid in self.leaf_nodes:
+            leaf = self.leaf_nodes[lid]
+            if leaf.is_pruned or leaf.predicted_class is None:
+                continue
+            d = 0
+            t = lid
+            while t > 1:
+                t //= 2
+                d += 1
+            max_depth = max(max_depth, d)
+        return max_depth
+
+    def compute_feature_importances(self, normalize: bool = True) -> np.ndarray:
+        """Compute feature importances based on split frequency.
+
+        Returns a 1-D array of length ``len(self.features)`` with the
+        number of times each feature is used as a splitting variable
+        across all branch nodes.  When *normalize* is True (default)
+        the values are divided by their sum so they add up to 1.
+        """
+        counts = np.zeros(len(self.features), dtype=np.float64)
+        for node in self.branch_nodes.values():
+            if node.feature_index is not None:
+                pos = self.features.index(node.feature_index)
+                counts[pos] += 1
+        total = counts.sum()
+        if normalize and total > 0:
+            counts /= total
+        return counts
+
+    def store_leaf_distributions(self, X: np.ndarray, y: np.ndarray, classes: list):
+        """Compute and store per-leaf class distributions from training data.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+        y : np.ndarray of shape (n_samples,)
+        classes : list of class labels (sorted)
+        """
+        leaf_ids = self._route_all_to_leaves(X)
+        for lid, leaf in self.leaf_nodes.items():
+            if leaf.is_pruned or leaf.predicted_class is None:
+                continue
+            mask = leaf_ids == lid
+            if not mask.any():
+                leaf.class_distribution = {c: 0 for c in classes}
+                continue
+            y_leaf = y[mask]
+            dist = {}
+            for c in classes:
+                dist[c] = int(np.sum(y_leaf == c))
+            leaf.class_distribution = dist
+
+    def predict_proba(self, X: np.ndarray, classes: list) -> np.ndarray:
+        """Return class probability estimates for each sample.
+
+        Probabilities are the proportion of training samples of each
+        class in the leaf that the sample is routed to.
+
+        Parameters
+        ----------
+        X : np.ndarray of shape (n_samples, n_features)
+        classes : list of class labels (sorted, same order as columns)
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_classes)
+        """
+        leaf_ids = self._route_all_to_leaves(X)
+        n_classes = len(classes)
+        proba = np.zeros((X.shape[0], n_classes), dtype=np.float64)
+
+        for lid, leaf in self.leaf_nodes.items():
+            mask = leaf_ids == lid
+            if not mask.any():
+                continue
+            dist = leaf.class_distribution
+            if dist is None:
+                # Fallback: assign 1.0 to predicted class
+                if leaf.predicted_class is not None:
+                    idx = classes.index(leaf.predicted_class)
+                    proba[mask, idx] = 1.0
+                continue
+            total = sum(dist.values())
+            if total == 0:
+                continue
+            for j, c in enumerate(classes):
+                proba[mask, j] = dist.get(c, 0) / total
+
+        return proba
+
+    # ── Backward compatibility ────────────────────────────────────────
 
     def get_var_a_dict(self) -> dict:
         """Return node_id -> feature_vector list for backward compatibility."""

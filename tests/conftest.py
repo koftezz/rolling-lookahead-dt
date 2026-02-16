@@ -56,11 +56,15 @@ def single_class_dataset():
 
 @pytest.fixture
 def wine_train_data():
-    """First 50 rows of the bundled Wine training dataset."""
+    """Stratified sample of the bundled Wine training dataset."""
     data_dir = os.path.join(os.path.dirname(__file__), "..", "rollotree", "data")
     path = os.path.join(data_dir, "train.csv")
     if os.path.exists(path):
-        return pd.read_csv(path).head(50)
+        df = pd.read_csv(path)
+        # Stratified sample so all classes are represented
+        return df.groupby("y", group_keys=False).apply(
+            lambda x: x.head(20)
+        ).reset_index(drop=True)
     pytest.skip("Wine train.csv not found")
 
 
