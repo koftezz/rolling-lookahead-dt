@@ -290,8 +290,11 @@ class RollingOptimizer:
                 ):
                     logger.warning(
                         f"Subproblem at parent {parent_node} failed: "
-                        f"{sub_solution.status}"
+                        f"{sub_solution.status} — pruning leaves"
                     )
+                    for lid in leaf_ids:
+                        pruned_node_ids.add(lid)
+                        tree.prune_leaf(lid)
                     continue
 
                 # Merge subtree into main tree
