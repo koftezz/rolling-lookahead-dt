@@ -59,9 +59,8 @@ def wine_train_data():
     if os.path.exists(path):
         df = pd.read_csv(path)
         # Stratified sample so all classes are represented
-        return df.groupby("y", group_keys=False).apply(
-            lambda x: x.head(20)
-        ).reset_index(drop=True)
+        samples = [group.head(20) for _, group in df.groupby("y")]
+        return pd.concat(samples, ignore_index=True)
     pytest.skip("Wine train.csv not found")
 
 
