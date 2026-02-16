@@ -14,7 +14,13 @@ RolloTree builds interpretable decision trees by solving a sequence of small mix
   - **HiGHS** (open-source, installed by default)
   - **Gurobi** (commercial, optional — install `gurobipy` separately)
   - **CBC** (open-source, bundled with PuLP)
-- **sklearn-style API** — `fit()` / `predict()` / `score()`
+- **Full sklearn compatibility** — `fit()` / `predict()` / `score()` / `predict_proba()` / `get_params()` / `set_params()` — works with `GridSearchCV`, `Pipeline`, `cross_val_score`, and `clone()`
+- **Class probabilities** — `predict_proba()` returns per-class probabilities from leaf distributions
+- **Feature importances** — `feature_importances_` based on split frequency across branch nodes
+- **Tree visualization** — `export_text()` for ASCII and `export_graphviz()` for DOT/Graphviz output
+- **Tree inspection** — `apply()`, `decision_path()`, `get_n_leaves()`, `get_depth()`
+- **Model persistence** — `save()` / `load()` via joblib, plus standard pickle support
+- **Input validation** — clear error messages for non-binary features, single-class targets, and more
 - **Two impurity criteria** — Gini index or misclassification error
 - **Arbitrary depth** — depth-2 base tree extended via rolling subtree optimization
 - **Parallel solving** — `n_jobs=-1` to solve independent subproblems across CPU cores
@@ -31,7 +37,7 @@ Or in editable/development mode (from a local clone):
 pip install -e ".[dev]"
 ```
 
-Dependencies: `pulp`, `highspy`, `numpy`, `pandas`.
+Dependencies: `pulp`, `highspy`, `numpy`, `pandas`, `scipy`, `joblib`.
 
 For faster prediction and tree building with [Numba](https://numba.pydata.org/) JIT compilation:
 
@@ -66,6 +72,51 @@ model.fit(X_train, y_train)
 
 # Evaluate
 print(f"Test accuracy: {model.score(X_test, y_test):.3f}")
+
+# Class probabilities
+proba = model.predict_proba(X_test)
+print(f"Probabilities shape: {proba.shape}")
+
+# Feature importances
+importances = model.feature_importances_
+print(f"Top feature: {importances.argmax()}, importance: {importances.max():.3f}")
+
+# Tree visualization
+from rollotree import export_text
+print(export_text(model.tree_))
+```
+
+### sklearn Integration
+
+```python
+from sklearn.model_selection import cross_val_score, StratifiedKFold, GridSearchCV
+
+# Cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+scores = cross_val_score(model, X_train, y_train, cv=cv)
+print(f"CV accuracy: {scores.mean():.3f} (+/- {scores.std():.3f})")
+
+# Grid search
+grid = GridSearchCV(
+    RollingOCT(solver="highs"),
+    {"depth": [2, 3, 4], "criterion": ["gini", "misclassification"]},
+    cv=cv,
+)
+grid.fit(X_train, y_train)
+print(f"Best params: {grid.best_params_}")
+```
+
+### Model Persistence
+
+```python
+# Save and load
+model.save("my_tree.joblib")
+loaded = RollingOCT.load("my_tree.joblib")
+
+# Standard pickle also works
+import pickle
+data = pickle.dumps(model)
+loaded = pickle.loads(data)
 ```
 
 ### Parallel Execution
@@ -113,7 +164,16 @@ RollingOCT(
 |--------|-------------|
 | `fit(X, y)` | Train the model. `X` is a binary feature matrix (DataFrame or array), `y` is the target. Returns `self`. |
 | `predict(X)` | Return class predictions as a numpy array. |
+| `predict_proba(X)` | Return class probability estimates (n_samples × n_classes). |
 | `score(X, y)` | Return accuracy (fraction correct). |
+| `apply(X)` | Return leaf node IDs for each sample. |
+| `decision_path(X)` | Return sparse CSR matrix of nodes visited by each sample. |
+| `get_n_leaves()` | Return number of active (non-pruned) leaf nodes. |
+| `get_depth()` | Return the actual depth of the deepest active path. |
+| `get_params()` | Return dict of estimator parameters (sklearn protocol). |
+| `set_params(**params)` | Set estimator parameters (sklearn protocol). Returns `self`. |
+| `save(path)` | Save the fitted model to a file (joblib). |
+| `RollingOCT.load(path)` | Load a saved model (class method). |
 
 **Attributes (after fitting):**
 
@@ -123,6 +183,16 @@ RollingOCT(
 | `depth_results_` | Dict mapping depth → `DepthResult(depth, training_accuracy, test_accuracy, elapsed_time)` |
 | `classes_` | Sorted list of unique class labels |
 | `features_` | List of feature indices used |
+| `feature_importances_` | Feature importance array (split frequency, normalized to sum to 1) |
+| `n_features_in_` | Number of features seen during `fit()` |
+| `feature_names_in_` | Feature names (when `X` is a DataFrame) |
+
+**Visualization functions:**
+
+| Function | Description |
+|----------|-------------|
+| `export_text(tree, feature_names=None)` | ASCII tree representation |
+| `export_graphviz(tree, feature_names=None, class_names=None)` | DOT format string for Graphviz |
 
 ### Solver Options
 
@@ -134,10 +204,12 @@ RollingOCT(
 
 ## Examples
 
-See the `examples/` directory for Jupyter notebooks:
+See the `examples/` directory for Jupyter notebooks (all with saved outputs):
 
-- **[01_quickstart.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/01_quickstart.ipynb)** — Basic usage: load data, train, predict, evaluate
-- **[02_advanced.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/02_advanced.ipynb)** — Comparing solvers, criteria, and tree depths
+- **[01_quickstart.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/01_quickstart.ipynb)** — Fit/predict/score, `predict_proba`, `feature_importances_`
+- **[02_visualization.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/02_visualization.ipynb)** — `export_text`, `export_graphviz`, `apply`, `decision_path`, tree inspection
+- **[03_sklearn_integration.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/03_sklearn_integration.ipynb)** — `GridSearchCV`, `Pipeline`, `cross_val_score`, model persistence
+- **[04_advanced.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/04_advanced.ipynb)** — Depth analysis, preprocessing, solver tuning, parallel execution, tree internals, Numba, per-leaf stats, criteria comparison, early stopping
 
 ## Dataset
 
@@ -159,6 +231,7 @@ rollotree/
     classifier.py            # RollingOCT (sklearn-like fit/predict)
     tree/
         nodes.py             # DecisionNode, LeafNode, DecisionTree
+        export.py            # export_text(), export_graphviz()
         impurity.py          # GiniCriterion, MisclassificationCriterion
         utils.py             # Node generation, index mapping helpers
         _numba.py            # Optional Numba-accelerated tree routing
@@ -172,7 +245,7 @@ rollotree/
         helpers.py           # Data binarization and preprocessing
     data/
         train.csv, test.csv  # Example Wine dataset
-tests/                       # 90+ pytest test cases
+tests/                       # 129 pytest test cases
 benchmarks/                  # Performance benchmarks
 examples/                    # Jupyter notebooks
 ```
