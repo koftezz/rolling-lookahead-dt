@@ -209,6 +209,7 @@ See the `examples/` directory for Jupyter notebooks (all with saved outputs):
 - **[01_quickstart.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/01_quickstart.ipynb)** — Fit/predict/score, `predict_proba`, `feature_importances_`
 - **[02_visualization.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/02_visualization.ipynb)** — `export_text`, `export_graphviz`, `apply`, `decision_path`, tree inspection
 - **[03_sklearn_integration.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/03_sklearn_integration.ipynb)** — `GridSearchCV`, `Pipeline`, `cross_val_score`, model persistence
+- **[04_advanced.ipynb](https://github.com/koftezz/rolling-lookahead-dt/blob/main/examples/04_advanced.ipynb)** — Depth analysis, preprocessing, solver tuning, parallel execution, tree internals, Numba, per-leaf stats, criteria comparison, early stopping
 
 ## Dataset
 
