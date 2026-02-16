@@ -20,12 +20,11 @@ def export_text(tree, feature_names: Optional[List[str]] = None) -> str:
     """
     if feature_names is None:
         feature_names = [f"feature_{f}" for f in tree.features]
-    else:
-        if len(feature_names) != len(tree.features):
-            raise ValueError(
-                f"feature_names has {len(feature_names)} entries, "
-                f"but tree has {len(tree.features)} features."
-            )
+    elif len(feature_names) != len(tree.features):
+        raise ValueError(
+            f"feature_names has {len(feature_names)} entries, "
+            f"but tree has {len(tree.features)} features."
+        )
     feat_map = dict(zip(tree.features, feature_names))
     lines = []
     _export_text_recurse(tree, 1, 0, feat_map, lines)
@@ -58,23 +57,14 @@ def _export_text_recurse(tree, node_id, depth, feat_map, lines):
     left_child = node_id * 2
     right_child = node_id * 2 + 1
 
-    # Left branch: feature == 1
-    lines.append(f"{indent}|--- {fname} == 1")
-    if left_child in tree._pruned_node_ids:
-        leaf = tree.leaf_nodes.get(left_child)
-        cls = leaf.predicted_class if leaf else "?"
-        lines.append(f"{indent}|   class: {cls} (pruned)")
-    else:
-        _export_text_recurse(tree, left_child, depth + 1, feat_map, lines)
-
-    # Right branch: feature == 0
-    lines.append(f"{indent}|--- {fname} == 0")
-    if right_child in tree._pruned_node_ids:
-        leaf = tree.leaf_nodes.get(right_child)
-        cls = leaf.predicted_class if leaf else "?"
-        lines.append(f"{indent}|   class: {cls} (pruned)")
-    else:
-        _export_text_recurse(tree, right_child, depth + 1, feat_map, lines)
+    for child_id, val in [(left_child, 1), (right_child, 0)]:
+        lines.append(f"{indent}|--- {fname} == {val}")
+        if child_id in tree._pruned_node_ids:
+            leaf = tree.leaf_nodes.get(child_id)
+            cls = leaf.predicted_class if leaf else "?"
+            lines.append(f"{indent}|   class: {cls} (pruned)")
+        else:
+            _export_text_recurse(tree, child_id, depth + 1, feat_map, lines)
 
 
 def export_graphviz(
@@ -150,30 +140,27 @@ def _graphviz_recurse(tree, node_id, feat_map, class_map, lines):
     left_child = node_id * 2
     right_child = node_id * 2 + 1
 
-    # Left child (feature == 1)
-    if left_child in tree._pruned_node_ids:
-        leaf = tree.leaf_nodes.get(left_child)
-        if leaf and leaf.predicted_class is not None:
-            cls = class_map.get(leaf.predicted_class, str(leaf.predicted_class))
+    for child_id, edge_label in [(left_child, "= 1"), (right_child, "= 0")]:
+        if child_id in tree._pruned_node_ids:
+            if _graphviz_pruned_leaf(tree, child_id, class_map, lines):
+                lines.append(
+                    f'    {node_id} -> {child_id} [label="{edge_label}"];'
+                )
+        else:
+            _graphviz_recurse(tree, child_id, feat_map, class_map, lines)
             lines.append(
-                f'    {left_child} [label="class: {cls}\\n(pruned)", '
-                f'fillcolor="#d5dbdb"];'
+                f'    {node_id} -> {child_id} [label="{edge_label}"];'
             )
-            lines.append(f'    {node_id} -> {left_child} [label="= 1"];')
-    else:
-        _graphviz_recurse(tree, left_child, feat_map, class_map, lines)
-        lines.append(f'    {node_id} -> {left_child} [label="= 1"];')
 
-    # Right child (feature == 0)
-    if right_child in tree._pruned_node_ids:
-        leaf = tree.leaf_nodes.get(right_child)
-        if leaf and leaf.predicted_class is not None:
-            cls = class_map.get(leaf.predicted_class, str(leaf.predicted_class))
-            lines.append(
-                f'    {right_child} [label="class: {cls}\\n(pruned)", '
-                f'fillcolor="#d5dbdb"];'
-            )
-            lines.append(f'    {node_id} -> {right_child} [label="= 0"];')
-    else:
-        _graphviz_recurse(tree, right_child, feat_map, class_map, lines)
-        lines.append(f'    {node_id} -> {right_child} [label="= 0"];')
+
+def _graphviz_pruned_leaf(tree, child_id, class_map, lines):
+    """Emit a DOT node for a pruned leaf. Returns True if a node was emitted."""
+    leaf = tree.leaf_nodes.get(child_id)
+    if leaf and leaf.predicted_class is not None:
+        cls = class_map.get(leaf.predicted_class, str(leaf.predicted_class))
+        lines.append(
+            f'    {child_id} [label="class: {cls}\\n(pruned)", '
+            f'fillcolor="#d5dbdb"];'
+        )
+        return True
+    return False

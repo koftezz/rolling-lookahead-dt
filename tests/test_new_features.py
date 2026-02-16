@@ -15,10 +15,19 @@ from rollotree import RollingOCT, export_text, export_graphviz
 
 
 def _make_dataset(n=40, n_features=5, n_classes=2, seed=42):
-    np.random.seed(seed)
-    X = np.random.randint(0, 2, size=(n, n_features))
-    y = np.random.randint(1, n_classes + 1, size=n)
+    rng = np.random.RandomState(seed)
+    X = rng.randint(0, 2, size=(n, n_features))
+    y = rng.randint(1, n_classes + 1, size=n)
     return X, y
+
+
+@pytest.fixture
+def fitted_model_2class():
+    """A depth-2 model fitted on a small binary-class dataset."""
+    X, y = _make_dataset(n=40, n_features=5, n_classes=2)
+    model = RollingOCT(depth=2)
+    model.fit(X, y)
+    return model, X, y
 
 
 # ── sklearn Protocol ──────────────────────────────────────────────────
@@ -74,10 +83,8 @@ class TestSklearnProtocol:
 
 
 class TestPredictProba:
-    def test_proba_shape(self):
-        X, y = _make_dataset(n=40, n_classes=2)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_proba_shape(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         proba = model.predict_proba(X)
         assert proba.shape == (40, 2)
 
@@ -88,10 +95,8 @@ class TestPredictProba:
         proba = model.predict_proba(X)
         np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-10)
 
-    def test_proba_nonnegative(self):
-        X, y = _make_dataset(n=40, n_classes=2)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_proba_nonnegative(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         proba = model.predict_proba(X)
         assert (proba >= 0).all()
 
@@ -108,11 +113,9 @@ class TestPredictProba:
         with pytest.raises(RuntimeError):
             model.predict_proba(np.zeros((5, 3)))
 
-    def test_proba_consistent_with_predict(self):
+    def test_proba_consistent_with_predict(self, fitted_model_2class):
         """argmax of proba should match predict."""
-        X, y = _make_dataset(n=40, n_classes=2)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+        model, X, _y = fitted_model_2class
         preds = model.predict(X)
         proba = model.predict_proba(X)
         proba_preds = np.array(model.classes_)[proba.argmax(axis=1)]
@@ -123,22 +126,16 @@ class TestPredictProba:
 
 
 class TestFeatureImportances:
-    def test_importances_shape(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_importances_shape(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         assert model.feature_importances_.shape == (5,)
 
-    def test_importances_sum_to_one(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_importances_sum_to_one(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         assert abs(model.feature_importances_.sum() - 1.0) < 1e-10
 
-    def test_importances_nonnegative(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_importances_nonnegative(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         assert (model.feature_importances_ >= 0).all()
 
     def test_importances_before_fit_is_none(self):
@@ -150,10 +147,8 @@ class TestFeatureImportances:
 
 
 class TestExportText:
-    def test_basic_output(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_basic_output(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         text = export_text(model.tree_)
         assert "class:" in text
         assert "==" in text
@@ -165,27 +160,21 @@ class TestExportText:
         text = export_text(model.tree_, feature_names=["age", "income", "gender"])
         assert "age" in text or "income" in text or "gender" in text
 
-    def test_wrong_feature_names_raises(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_wrong_feature_names_raises(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         with pytest.raises(ValueError, match="feature_names"):
             export_text(model.tree_, feature_names=["a", "b"])
 
 
 class TestExportGraphviz:
-    def test_basic_dot_output(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_basic_dot_output(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         dot = export_graphviz(model.tree_)
         assert "digraph Tree" in dot
         assert "class:" in dot
 
-    def test_with_class_names(self):
-        X, y = _make_dataset(n=40, n_features=5, n_classes=2)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_with_class_names(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         dot = export_graphviz(
             model.tree_,
             class_names=["negative", "positive"],
@@ -197,47 +186,33 @@ class TestExportGraphviz:
 
 
 class TestTreeInspection:
-    def test_apply_returns_leaf_ids(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_apply_returns_leaf_ids(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         leaf_ids = model.apply(X)
         assert leaf_ids.shape == (40,)
-        # Leaf IDs should be in the tree's leaf_nodes
         for lid in np.unique(leaf_ids):
             assert lid in model.tree_.leaf_nodes
 
-    def test_decision_path_is_sparse(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_decision_path_is_sparse(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         path = model.decision_path(X)
         assert sparse.issparse(path)
         assert path.shape[0] == 40
 
-    def test_decision_path_root_always_visited(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_decision_path_root_always_visited(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         path = model.decision_path(X)
-        # Node 1 (root) should be visited by all samples
         root_col = path[:, 1].toarray().flatten()
         assert (root_col == 1).all()
 
-    def test_get_n_leaves(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_get_n_leaves(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
         n_leaves = model.get_n_leaves()
-        assert n_leaves >= 2
-        assert n_leaves <= 4  # Depth-2 tree has at most 4 leaves
+        assert 2 <= n_leaves <= 4
 
-    def test_get_depth(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
-        depth = model.get_depth()
-        assert depth == 2
+    def test_get_depth(self, fitted_model_2class):
+        model, _X, _y = fitted_model_2class
+        assert model.get_depth() == 2
 
     def test_inspection_before_fit_raises(self):
         model = RollingOCT()
@@ -256,61 +231,40 @@ class TestTreeInspection:
 
 
 class TestModelPersistence:
-    def test_save_load_roundtrip(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_save_load_roundtrip(self, fitted_model_2class, tmp_path):
+        model, X, _y = fitted_model_2class
         preds_before = model.predict(X)
 
-        with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as f:
-            path = f.name
-        try:
-            model.save(path)
-            loaded = RollingOCT.load(path)
-            preds_after = loaded.predict(X)
-            np.testing.assert_array_equal(preds_before, preds_after)
-            assert loaded.classes_ == model.classes_
-            assert loaded.depth == model.depth
-        finally:
-            os.unlink(path)
+        path = str(tmp_path / "model.joblib")
+        model.save(path)
+        loaded = RollingOCT.load(path)
+        np.testing.assert_array_equal(loaded.predict(X), preds_before)
+        assert loaded.classes_ == model.classes_
+        assert loaded.depth == model.depth
 
-    def test_save_load_proba_preserved(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_save_load_proba_preserved(self, fitted_model_2class, tmp_path):
+        model, X, _y = fitted_model_2class
         proba_before = model.predict_proba(X)
 
-        with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as f:
-            path = f.name
-        try:
-            model.save(path)
-            loaded = RollingOCT.load(path)
-            proba_after = loaded.predict_proba(X)
-            np.testing.assert_array_equal(proba_before, proba_after)
-        finally:
-            os.unlink(path)
+        path = str(tmp_path / "model.joblib")
+        model.save(path)
+        loaded = RollingOCT.load(path)
+        np.testing.assert_array_equal(loaded.predict_proba(X), proba_before)
 
-    def test_pickle_roundtrip(self):
-        X, y = _make_dataset(n=40, n_features=5)
-        model = RollingOCT(depth=2)
-        model.fit(X, y)
+    def test_pickle_roundtrip(self, fitted_model_2class):
+        model, X, _y = fitted_model_2class
         preds_before = model.predict(X)
 
-        data = pickle.dumps(model)
-        loaded = pickle.loads(data)
-        preds_after = loaded.predict(X)
-        np.testing.assert_array_equal(preds_before, preds_after)
+        loaded = pickle.loads(pickle.dumps(model))
+        np.testing.assert_array_equal(loaded.predict(X), preds_before)
 
-    def test_load_wrong_type_raises(self):
-        with tempfile.NamedTemporaryFile(suffix=".joblib", delete=False) as f:
-            path = f.name
-        try:
-            import joblib
-            joblib.dump({"not": "a model"}, path)
-            with pytest.raises(TypeError, match="expected RollingOCT"):
-                RollingOCT.load(path)
-        finally:
-            os.unlink(path)
+    def test_load_wrong_type_raises(self, tmp_path):
+        import joblib
+
+        path = str(tmp_path / "not_a_model.joblib")
+        joblib.dump({"not": "a model"}, path)
+        with pytest.raises(TypeError, match="expected RollingOCT"):
+            RollingOCT.load(path)
 
 
 # ── Input Validation ──────────────────────────────────────────────────

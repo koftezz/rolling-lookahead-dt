@@ -21,10 +21,8 @@ def tiny_binary_dataset():
 @pytest.fixture
 def small_binary_dataset():
     """20 samples, 5 binary features, 2 classes."""
-    np.random.seed(42)
-    n = 20
-    X = np.random.randint(0, 2, size=(n, 5))
-    # Class depends on features 0 and 1
+    rng = np.random.RandomState(42)
+    X = rng.randint(0, 2, size=(20, 5))
     y = ((X[:, 0] == 1) & (X[:, 1] == 1)).astype(int) + 1
     data = pd.DataFrame(X, columns=[1, 2, 3, 4, 5])
     data.insert(0, "y", y)
@@ -34,9 +32,8 @@ def small_binary_dataset():
 @pytest.fixture
 def multiclass_dataset():
     """15 samples, 4 binary features, 3 classes."""
-    np.random.seed(123)
-    n = 15
-    X = np.random.randint(0, 2, size=(n, 4))
+    rng = np.random.RandomState(123)
+    X = rng.randint(0, 2, size=(15, 4))
     y = np.array([1] * 5 + [2] * 5 + [3] * 5)
     data = pd.DataFrame(X, columns=[1, 2, 3, 4])
     data.insert(0, "y", y)

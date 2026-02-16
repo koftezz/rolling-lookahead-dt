@@ -1,6 +1,5 @@
 """Public API: sklearn-compatible RollingOCT classifier."""
 
-import logging
 import warnings
 
 import joblib
@@ -11,8 +10,6 @@ from rollotree.tree.nodes import DecisionTree
 from rollotree.tree.impurity import get_criterion
 from rollotree.solver.base import SolverConfig
 from rollotree.rolling.optimizer import RollingOptimizer
-
-logger = logging.getLogger(__name__)
 
 
 def _to_feature_array(X) -> np.ndarray:
@@ -390,11 +387,11 @@ class RollingOCT:
     def _validate_input(X: np.ndarray, y: np.ndarray):
         """Validate that features are binary and labels have >=2 classes."""
         unique_vals = np.unique(X)
-        non_binary = set(unique_vals) - {0, 1, 0.0, 1.0}
-        if non_binary:
+        non_binary = unique_vals[(unique_vals != 0) & (unique_vals != 1)]
+        if len(non_binary) > 0:
             raise ValueError(
                 f"X must contain only binary (0/1) values. "
-                f"Found non-binary values: {sorted(non_binary)[:5]}. "
+                f"Found non-binary values: {non_binary[:5].tolist()}. "
                 f"Use rollotree.preprocessing.helpers.make_data_binary() "
                 f"to binarize your data."
             )

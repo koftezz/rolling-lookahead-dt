@@ -110,7 +110,14 @@ class DecisionTree:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict for a 2D array of samples (n_samples, n_features)."""
         leaf_ids = self._route_all_to_leaves(X)
-        predictions = np.empty(len(X), dtype=object)
+        # Infer dtype from leaf classes to avoid object arrays (breaks sklearn)
+        sample_class = next(
+            (leaf.predicted_class for leaf in self.leaf_nodes.values()
+             if leaf.predicted_class is not None),
+            None,
+        )
+        dtype = np.array([sample_class]).dtype if sample_class is not None else object
+        predictions = np.empty(len(X), dtype=dtype)
         for lid, leaf in self.leaf_nodes.items():
             mask = leaf_ids == lid
             if mask.any() and leaf.predicted_class is not None:
@@ -174,8 +181,6 @@ class DecisionTree:
                 branch_feat_pos[nid] = node.feature_position
 
         pruned = np.array(sorted(self._pruned_node_ids), dtype=np.int64)
-        if len(pruned) == 0:
-            pruned = np.empty(0, dtype=np.int64)
 
         X_int = np.ascontiguousarray(X, dtype=np.int64)
         return _predict_batch_numba(
@@ -286,10 +291,10 @@ class DecisionTree:
             Entry (i, j) is 1 if sample i passes through node j.
         """
         n = X.shape[0]
-        all_node_ids = (
-            set(self.branch_nodes.keys()) | set(self.leaf_nodes.keys())
+        max_node_id = max(
+            max(self.branch_nodes, default=1),
+            max(self.leaf_nodes, default=1),
         )
-        max_node_id = max(all_node_ids) if all_node_ids else 1
 
         rows, cols = [], []
         for i in range(n):
@@ -326,16 +331,12 @@ class DecisionTree:
     def get_depth(self) -> int:
         """Return the actual depth of the deepest active path."""
         max_depth = 0
-        for lid in self.leaf_nodes:
-            leaf = self.leaf_nodes[lid]
+        for leaf in self.leaf_nodes.values():
             if leaf.is_pruned or leaf.predicted_class is None:
                 continue
-            d = 0
-            t = lid
-            while t > 1:
-                t //= 2
-                d += 1
-            max_depth = max(max_depth, d)
+            # bit_length of a node id gives depth: root (1) -> 1 bit -> depth 0
+            depth = leaf.node_id.bit_length() - 1
+            max_depth = max(max_depth, depth)
         return max_depth
 
     def compute_feature_importances(self, normalize: bool = True) -> np.ndarray:
@@ -349,8 +350,7 @@ class DecisionTree:
         counts = np.zeros(len(self.features), dtype=np.float64)
         for node in self.branch_nodes.values():
             if node.feature_index is not None:
-                pos = self.features.index(node.feature_index)
-                counts[pos] += 1
+                counts[node.feature_position] += 1
         total = counts.sum()
         if normalize and total > 0:
             counts /= total
@@ -370,14 +370,10 @@ class DecisionTree:
             if leaf.is_pruned or leaf.predicted_class is None:
                 continue
             mask = leaf_ids == lid
-            if not mask.any():
-                leaf.class_distribution = {c: 0 for c in classes}
-                continue
             y_leaf = y[mask]
-            dist = {}
-            for c in classes:
-                dist[c] = int(np.sum(y_leaf == c))
-            leaf.class_distribution = dist
+            leaf.class_distribution = {
+                c: int(np.sum(y_leaf == c)) for c in classes
+            }
 
     def predict_proba(self, X: np.ndarray, classes: list) -> np.ndarray:
         """Return class probability estimates for each sample.
@@ -395,20 +391,21 @@ class DecisionTree:
         np.ndarray of shape (n_samples, n_classes)
         """
         leaf_ids = self._route_all_to_leaves(X)
-        n_classes = len(classes)
-        proba = np.zeros((X.shape[0], n_classes), dtype=np.float64)
+        proba = np.zeros((X.shape[0], len(classes)), dtype=np.float64)
 
         for lid, leaf in self.leaf_nodes.items():
             mask = leaf_ids == lid
             if not mask.any():
                 continue
+
             dist = leaf.class_distribution
             if dist is None:
-                # Fallback: assign 1.0 to predicted class
-                if leaf.predicted_class is not None:
-                    idx = classes.index(leaf.predicted_class)
-                    proba[mask, idx] = 1.0
+                # Fallback: assign probability 1.0 to predicted class
+                if leaf.predicted_class is None:
+                    continue
+                proba[mask, classes.index(leaf.predicted_class)] = 1.0
                 continue
+
             total = sum(dist.values())
             if total == 0:
                 continue
