@@ -1,5 +1,6 @@
 """Public sklearn-compatible RollingOCT classifier."""
 
+import math
 from numbers import Integral, Real
 import warnings
 
@@ -40,6 +41,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         Per-solve time limit in seconds.
     mip_gap : float or None, default=None
         Relative MIP optimality gap in the closed interval [0, 1].
+        Exact depth-3 initialization requires ``None`` or zero and explicitly
+        solves with a zero gap before reporting an optimality certificate.
     big_m : float, default=99
         Positive empty-leaf penalty used by the OCT-2 formulation.
     log_to_console : bool, default=False
@@ -261,8 +264,20 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         except TypeError:
             valid = False
         if not valid:
-            values = np.unique(X)
-            non_binary = [value for value in values if value not in (0, 1)]
+            # np.unique sorts object arrays and can itself raise TypeError for
+            # mixed values, obscuring the useful binary-input error.
+            non_binary = []
+            for value in np.asarray(X, dtype=object).ravel():
+                try:
+                    is_binary = value in (0, 1)
+                except (TypeError, ValueError):
+                    is_binary = False
+                if not is_binary and not any(
+                    repr(value) == repr(existing) for existing in non_binary
+                ):
+                    non_binary.append(value)
+                    if len(non_binary) == 5:
+                        break
             raise ValueError(
                 "X must contain only binary (0/1) values. Found non-binary "
                 f"values: {non_binary[:5]}. Use "
@@ -353,6 +368,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         if (
             not isinstance(value, Real)
             or isinstance(value, bool)
+            or not math.isfinite(value)
             or value <= 0
         ):
             raise ValueError(f"{name} must be a positive number")

@@ -17,12 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Enforced `min_samples_leaf` instead of silently restoring invalid feature pairs.
-- Distinguished feasible time-limit incumbents from solver errors.
+- Distinguished feasible time-limit incumbents from both solver errors and
+  true optimal solutions, including HiGHS/CBC's dual-status convention.
 - Validated binary values, feature counts, and DataFrame column identity/order at prediction time.
 - Made `depth` changes through `set_params()` affect the next fit.
 - Counted all populated terminal leaves and reported actual realized depth/results.
 - Reported `completed` when the requested maximum depth is reached, even when terminal leaves remain mixed.
 - Added a safe sequential fallback when multiprocessing primitives are unavailable.
+- Made fit-wide deadlines process-independent and rejected non-finite budgets.
+- Preserved object-backed binary inputs, legacy custom criteria, and full string class labels.
 - Unified runtime and package metadata on one version source.
 
 ### Performance

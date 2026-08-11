@@ -152,3 +152,13 @@ def test_invalid_feature_subset_raises(feature_subset, message):
     solver = ExactDepth3Solver(SolverConfig(), GiniCriterion())
     with pytest.raises(ValueError, match=message):
         solver.solve(data, features, classes, feature_subset=feature_subset)
+
+
+def test_exact_solver_requires_and_sets_zero_mip_gap():
+    with pytest.raises(ValueError, match="mip_gap"):
+        ExactDepth3Solver(
+            SolverConfig(mip_gap=0.01), GiniCriterion()
+        )
+
+    solver = ExactDepth3Solver(SolverConfig(mip_gap=None), GiniCriterion())
+    assert solver.config.mip_gap == 0.0

@@ -11,6 +11,7 @@ from pulp import (
     value,
     LpStatus,
     LpSolutionIntegerFeasible,
+    LpSolutionOptimal,
 )
 
 from rollotree.solver.base import OCT2Solution, SolverConfig, SolverStatus
@@ -185,10 +186,18 @@ class PuLPOCT2Solver:
 
         root_feature = left_root_feature
 
-        if status_str == "Optimal":
-            solution_status = SolverStatus.OPTIMAL
-        elif getattr(prob, "sol_status", None) == LpSolutionIntegerFeasible:
+        # Native HiGHS and CBC can expose a time-limited incumbent with an
+        # ``Optimal`` problem status while retaining the real distinction in
+        # ``sol_status``.  Inspect the latter first so a feasible incumbent is
+        # never promoted to a false optimality certificate.
+        solution_status_code = getattr(prob, "sol_status", None)
+        if solution_status_code == LpSolutionIntegerFeasible:
             solution_status = SolverStatus.TIME_LIMIT
+        elif (
+            status_str == "Optimal"
+            and solution_status_code == LpSolutionOptimal
+        ):
+            solution_status = SolverStatus.OPTIMAL
         else:
             return OCT2Solution(status=SolverStatus.ERROR)
 

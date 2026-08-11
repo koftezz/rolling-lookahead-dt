@@ -4,10 +4,25 @@ import numpy as np
 import pytest
 
 from rollotree.tree.impurity import (
+    ImpurityCriterion,
     GiniCriterion,
     MisclassificationCriterion,
     get_criterion,
 )
+
+
+class _LegacyCustomCriterion(ImpurityCriterion):
+    """Shape of a custom criterion supported before release 2.1."""
+
+    def compute_leaf_coefficients(
+        self, data, features, leaf_nodes, leaf_paths, classes, y_idx=0
+    ):
+        return {leaf: {} for leaf in leaf_nodes}
+
+
+def test_legacy_custom_criterion_remains_instantiable():
+    criterion = _LegacyCustomCriterion()
+    assert criterion.combine_subproblem_objective(3.0, 2, 10) == 3.0
 
 
 class TestGiniCriterion:

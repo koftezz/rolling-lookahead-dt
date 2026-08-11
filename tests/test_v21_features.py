@@ -1,5 +1,6 @@
 """Regression tests for the 2.1 correctness and search-control release."""
 
+from decimal import Decimal
 from itertools import product
 
 import numpy as np
@@ -99,6 +100,29 @@ def test_predict_validates_binary_values_and_dataframe_schema():
         model.predict(X.drop(columns="f3").to_numpy())
 
 
+def test_object_backed_binary_values_use_safe_routing_fallback():
+    X, y = _complete_binary_dataset()
+    object_X = np.asarray(
+        [[Decimal(int(value)) for value in row] for row in X.to_numpy()],
+        dtype=object,
+    )
+
+    model = RollingOCT(time_limit=60).fit(object_X, y)
+
+    np.testing.assert_array_equal(
+        model.predict(object_X), model.predict(X.to_numpy())
+    )
+
+
+def test_mixed_object_values_report_binary_validation_error():
+    X, y = _complete_binary_dataset()
+    mixed = X.to_numpy(dtype=object)
+    mixed[0, 0] = "not-binary"
+
+    with pytest.raises(ValueError, match="binary"):
+        RollingOCT().fit(mixed, y)
+
+
 @pytest.mark.parametrize(
     "params, message",
     [
@@ -109,6 +133,8 @@ def test_predict_validates_binary_values_and_dataframe_schema():
         ({"max_features": 99}, "number of input features"),
         ({"total_time_limit": 0}, "total_time_limit"),
         ({"random_state": -1}, "random_state"),
+        ({"time_limit": float("nan")}, "time_limit"),
+        ({"total_time_limit": float("inf")}, "total_time_limit"),
     ],
 )
 def test_set_params_values_are_revalidated_at_fit(params, message):

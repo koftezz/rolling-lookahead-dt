@@ -115,13 +115,19 @@ class DecisionTree:
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict for a 2D array of samples (n_samples, n_features)."""
         leaf_ids = self._route_all_to_leaves(X)
-        # Infer dtype from leaf classes to avoid object arrays (breaks sklearn)
-        sample_class = next(
-            (leaf.predicted_class for leaf in self.leaf_nodes.values()
-             if leaf.predicted_class is not None),
-            None,
+        # Infer dtype from every populated leaf. Using only the first class can
+        # silently truncate longer string labels (for example, ``"long"`` to
+        # ``"l"`` when the first class is ``"a"``).
+        populated_classes = [
+            leaf.predicted_class
+            for leaf in self.leaf_nodes.values()
+            if leaf.predicted_class is not None
+        ]
+        dtype = (
+            np.asarray(populated_classes).dtype
+            if populated_classes
+            else object
         )
-        dtype = np.array([sample_class]).dtype if sample_class is not None else object
         predictions = np.empty(len(X), dtype=dtype)
         assigned = np.zeros(len(X), dtype=bool)
         for lid, leaf in self.leaf_nodes.items():
@@ -180,7 +186,10 @@ class DecisionTree:
 
         Returns an array of leaf node IDs, one per sample.
         """
-        if HAS_NUMBA:
+        # Numba cannot compile object-dtype arrays. Binary numeric objects
+        # such as Decimal(0)/Decimal(1) remain valid input, so preserve the
+        # NumPy implementation as a correctness fallback.
+        if HAS_NUMBA and X.dtype != object:
             return self._route_all_numba(X)
         return self._route_all_numpy(X)
 

@@ -157,6 +157,22 @@ class TestDecisionTree:
         preds = tree.predict(X)
         np.testing.assert_array_equal(preds, [1, 2, 1, 2])
 
+    def test_predict_batch_preserves_full_string_labels(self):
+        tree = DecisionTree(depth=2, features=[1, 2])
+        tree.set_branch_feature(1, 1)
+        tree.set_branch_feature(2, 2)
+        tree.set_branch_feature(3, 2)
+        tree.set_leaf_class(4, "a")
+        tree.set_leaf_class(5, "long_label")
+        tree.set_leaf_class(6, "a")
+        tree.set_leaf_class(7, "long_label")
+
+        predictions = tree.predict(
+            np.array([[1, 1], [1, 0], [0, 1], [0, 0]])
+        )
+
+        assert predictions.tolist() == ["a", "long_label", "a", "long_label"]
+
     def test_predict_with_pruned_nodes(self):
         tree = DecisionTree(depth=2, features=[1, 2])
         tree.set_branch_feature(1, 1)

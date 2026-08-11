@@ -179,7 +179,7 @@ def _solve_candidate(inp: _CandidateInput) -> _CandidateResult:
     def config_with_remaining_time() -> Optional[SolverConfig]:
         if inp.deadline is None:
             return inp.config
-        remaining = inp.deadline - time.perf_counter()
+        remaining = inp.deadline - time.time()
         if remaining <= 0:
             return None
         return inp.config.copy_with(
@@ -367,7 +367,14 @@ class ExactDepth3Solver:
                 "ExactDepth3Solver supports GiniCriterion and "
                 "MisclassificationCriterion"
             )
-        self.config = config
+        if config.mip_gap not in (None, 0, 0.0):
+            raise ValueError(
+                "ExactDepth3Solver requires mip_gap to be None or 0; a "
+                "positive MIP gap cannot certify a globally optimal tree"
+            )
+        # HiGHS and Gurobi both have nonzero backend defaults. Request a zero
+        # gap explicitly so OPTIMAL supports the public exactness guarantee.
+        self.config = config.copy_with(mip_gap=0.0)
         self.criterion = criterion
         self.n_jobs = n_jobs
         self.deadline = deadline

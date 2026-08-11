@@ -126,6 +126,34 @@ class TestPuLPOCT2Solver:
         assert solution.root_feature == 1
         assert set(solution.leaf_classes) == {4, 5, 6, 7}
 
+    def test_backend_optimal_problem_status_does_not_hide_time_limit(
+        self, monkeypatch
+    ):
+        """HiGHS/CBC put time-limit detail in ``sol_status``."""
+        import pulp
+
+        def fake_solve(problem, _solver):
+            for variable in problem.variables():
+                variable.varValue = 0
+            variables = {variable.name: variable for variable in problem.variables()}
+            variables["x_1_2"].varValue = 1
+            variables["y_1_2"].varValue = 1
+            # This is the real PuLP shape for native HiGHS kTimeLimit and
+            # CBC's "Stopped on time - objective value" result.
+            problem.status = pulp.LpStatusOptimal
+            problem.sol_status = pulp.LpSolutionIntegerFeasible
+            problem.solutionTime = 0.01
+
+        monkeypatch.setattr(pulp.LpProblem, "solve", fake_solve)
+        data, features, classes = self._make_separable_data()
+
+        solution = PuLPOCT2Solver(
+            SolverConfig(time_limit=0.01), GiniCriterion()
+        ).solve(data, features, classes)
+
+        assert solution.status == SolverStatus.TIME_LIMIT
+        assert solution.root_feature == 1
+
     def test_time_limit_without_complete_incumbent_is_error(self, monkeypatch):
         """A backend stop without a complete assignment must not leak a tree."""
         import pulp

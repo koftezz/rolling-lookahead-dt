@@ -77,11 +77,16 @@ class ImpurityCriterion(ABC):
     ) -> dict:
         """Return ``leaf -> feature-pair -> objective coefficient``."""
 
-    @abstractmethod
     def combine_subproblem_objective(
         self, value: float, subset_n: int, total_n: int
     ) -> float:
-        """Scale a subtree objective for comparison in a larger tree."""
+        """Scale a subtree objective for comparison in a larger tree.
+
+        The default keeps custom OCT-2 criteria written before release 2.1
+        instantiable. Exact depth-3 restricts itself to the built-in criteria,
+        which override this method with their known objective scale.
+        """
+        return float(value)
 
 
 class GiniCriterion(ImpurityCriterion):

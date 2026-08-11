@@ -166,8 +166,11 @@ for diagnostic in model.subproblem_diagnostics_:
 With `depth=3, initial_depth=3`, optimal status certifies the globally optimal
 complete depth-3 tree over the selected feature subset. For larger requested
 depths, only that seed has a global certificate; subsequent levels use rolling
-OCT-2 expansion. Every populated leaf strictly honors `min_samples_leaf`, so
-infeasible complete trees raise a clear error instead of relaxing the contract.
+OCT-2 expansion. The exact initializer explicitly uses a zero MIP gap; passing
+a positive `mip_gap` with `initial_depth=3` raises an error because it cannot
+support a global-optimality certificate. Every populated leaf strictly honors
+`min_samples_leaf`, so infeasible complete trees raise a clear error instead
+of relaxing the contract.
 
 Predictive accuracy is not guaranteed to improve merely because the training
 objective is more optimal. The bundled paired Wine benchmark found lower Gini

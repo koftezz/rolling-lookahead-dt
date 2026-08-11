@@ -76,7 +76,7 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
 
     solver_config = inp.solver_config
     if inp.deadline is not None:
-        remaining = inp.deadline - time.perf_counter()
+        remaining = inp.deadline - time.time()
         if remaining <= 0:
             return SubproblemResult(
                 parent_node=inp.parent_node,

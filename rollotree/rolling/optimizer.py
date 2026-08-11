@@ -116,7 +116,7 @@ class RollingOptimizer:
     def _remaining_time(self) -> Optional[float]:
         if self._deadline is None:
             return None
-        return self._deadline - time.perf_counter()
+        return self._deadline - time.time()
 
     def _config_for_solve(self) -> Optional[SolverConfig]:
         remaining = self._remaining_time()
@@ -278,10 +278,13 @@ class RollingOptimizer:
         self.fit_status_ = "completed"
         self.subproblem_diagnostics_ = []
         self._started_at = time.perf_counter()
+        # Deadline values cross process boundaries. Python 3.9 on macOS does
+        # not guarantee a common ``perf_counter`` reference point between
+        # processes, while the wall clock is process-independent.
         self._deadline = (
             None
             if self.total_time_limit is None
-            else self._started_at + self.total_time_limit
+            else time.time() + self.total_time_limit
         )
         if self.random_state is None:
             self._base_seed = np.random.SeedSequence().generate_state(1)[0]
