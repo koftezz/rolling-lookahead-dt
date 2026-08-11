@@ -26,8 +26,9 @@ class TestRollingOCTInit:
         assert model.solver == "highs"
 
     def test_invalid_depth_raises(self):
-        with pytest.raises(ValueError, match="depth must be >= 2"):
-            RollingOCT(depth=1)
+        X, y = _make_X_y()
+        with pytest.raises(ValueError, match="depth"):
+            RollingOCT(depth=1).fit(X, y)
 
     def test_invalid_criterion_raises(self):
         X, y = _make_X_y()
@@ -36,8 +37,9 @@ class TestRollingOCTInit:
             model.fit(X, y)
 
     def test_invalid_solver_raises(self):
+        X, y = _make_X_y()
         with pytest.raises(ValueError, match="Unknown solver"):
-            RollingOCT(solver="cplex")
+            RollingOCT(solver="cplex").fit(X, y)
 
 
 class TestRollingOCTFitPredict:
@@ -145,14 +147,13 @@ class TestEarlyStopping:
         assert 0.0 <= model.score(X, y) <= 1.0
 
     def test_min_samples_leaf_high_value(self):
-        """Very high min_samples_leaf should still produce a valid tree via fallback."""
+        """An impossible leaf-size contract must fail instead of being ignored."""
         X, y = _make_X_y(n=20, n_features=3)
         model = RollingOCT(
             depth=2, solver="highs", min_samples_leaf=100, time_limit=60
         )
-        model.fit(X, y)
-        preds = model.predict(X)
-        assert len(preds) == len(X)
+        with pytest.raises(ValueError, match="No feasible depth-2 tree"):
+            model.fit(X, y)
 
     def test_early_stopping_with_numpy_input(self):
         """Early stopping params work with numpy arrays too."""

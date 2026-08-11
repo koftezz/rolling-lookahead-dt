@@ -16,6 +16,7 @@ class DecisionNode:
     node_id: int
     feature_index: Optional[int] = None
     feature_vector: Optional[np.ndarray] = None
+    feature_position: Optional[int] = None
 
     @property
     def left_child_id(self) -> int:
@@ -63,6 +64,7 @@ class DecisionTree:
         self.branch_nodes: dict = {}
         self.leaf_nodes: dict = {}
         self._pruned_node_ids: set = set()
+        self._routing_cache = None
         self._initialize_structure()
 
     def _initialize_structure(self):
@@ -83,6 +85,7 @@ class DecisionTree:
         )
         # Store the positional index for direct array lookup (avoids dot product)
         node.feature_position = self.features.index(feature_index)
+        self._routing_cache = None
 
     def set_leaf_class(self, node_id: int, predicted_class):
         """Set the predicted class for a leaf node."""
@@ -95,12 +98,14 @@ class DecisionTree:
         self._pruned_node_ids.add(node_id)
         if node_id in self.leaf_nodes:
             self.leaf_nodes[node_id].is_pruned = True
+        self._routing_cache = None
 
     def unprune_leaf(self, node_id: int):
         """Remove pruning from a leaf."""
         self._pruned_node_ids.discard(node_id)
         if node_id in self.leaf_nodes:
             self.leaf_nodes[node_id].is_pruned = False
+        self._routing_cache = None
 
     def predict_single(self, x: np.ndarray) -> int:
         """Route a single sample through the tree and return prediction."""
@@ -118,10 +123,18 @@ class DecisionTree:
         )
         dtype = np.array([sample_class]).dtype if sample_class is not None else object
         predictions = np.empty(len(X), dtype=dtype)
+        assigned = np.zeros(len(X), dtype=bool)
         for lid, leaf in self.leaf_nodes.items():
             mask = leaf_ids == lid
             if mask.any() and leaf.predicted_class is not None:
                 predictions[mask] = leaf.predicted_class
+                assigned[mask] = True
+        if not assigned.all():
+            missing = sorted(set(leaf_ids[~assigned].tolist()))
+            raise RuntimeError(
+                "Tree routed samples to leaves without class assignments: "
+                f"{missing[:5]}"
+            )
         return predictions
 
     def get_misclassified_leaves(self, X: np.ndarray, y: np.ndarray) -> list:
@@ -173,18 +186,21 @@ class DecisionTree:
 
     def _route_all_numba(self, X: np.ndarray) -> np.ndarray:
         """Numba-accelerated batch routing."""
-        # Build flat arrays for the compiled function
-        max_id = max(self.branch_nodes.keys()) if self.branch_nodes else 0
-        branch_feat_pos = np.full(max_id + 1, -1, dtype=np.int64)
-        for nid, node in self.branch_nodes.items():
-            if node.feature_vector is not None:
-                branch_feat_pos[nid] = node.feature_position
+        cache = getattr(self, "_routing_cache", None)
+        if cache is None:
+            max_id = max(self.branch_nodes.keys()) if self.branch_nodes else 0
+            branch_feat_pos = np.full(max_id + 1, -1, dtype=np.int64)
+            for nid, node in self.branch_nodes.items():
+                if node.feature_vector is not None:
+                    branch_feat_pos[nid] = node.feature_position
+            pruned = np.array(sorted(self._pruned_node_ids), dtype=np.int64)
+            cache = (branch_feat_pos, max_id, pruned)
+            self._routing_cache = cache
+        branch_feat_pos, max_id, pruned = cache
 
-        pruned = np.array(sorted(self._pruned_node_ids), dtype=np.int64)
-
-        X_int = np.ascontiguousarray(X, dtype=np.int64)
+        X_contiguous = np.ascontiguousarray(X)
         return _predict_batch_numba(
-            X_int, branch_feat_pos, max_id, pruned,
+            X_contiguous, branch_feat_pos, max_id, pruned,
             np.empty(0, dtype=np.int64),  # leaf_ids (unused in routing)
             np.empty(0, dtype=np.int64),  # leaf_classes (unused in routing)
             self.depth,
@@ -261,6 +277,8 @@ class DecisionTree:
             self.leaf_nodes.pop(child_id, None)
             self._pruned_node_ids.discard(child_id)
 
+        self._routing_cache = None
+
         return leaf_id_map
 
     # ── Inspection utilities ─────────────────────────────────────────
@@ -322,17 +340,17 @@ class DecisionTree:
         )
 
     def get_n_leaves(self) -> int:
-        """Return the number of active (non-pruned) leaf nodes."""
+        """Return the number of populated terminal leaf nodes."""
         return sum(
             1 for leaf in self.leaf_nodes.values()
-            if not leaf.is_pruned and leaf.predicted_class is not None
+            if leaf.predicted_class is not None
         )
 
     def get_depth(self) -> int:
         """Return the actual depth of the deepest active path."""
         max_depth = 0
         for leaf in self.leaf_nodes.values():
-            if leaf.is_pruned or leaf.predicted_class is None:
+            if leaf.predicted_class is None:
                 continue
             # bit_length of a node id gives depth: root (1) -> 1 bit -> depth 0
             depth = leaf.node_id.bit_length() - 1
@@ -367,7 +385,7 @@ class DecisionTree:
         """
         leaf_ids = self._route_all_to_leaves(X)
         for lid, leaf in self.leaf_nodes.items():
-            if leaf.is_pruned or leaf.predicted_class is None:
+            if leaf.predicted_class is None:
                 continue
             mask = leaf_ids == lid
             y_leaf = y[mask]
@@ -403,7 +421,11 @@ class DecisionTree:
                 # Fallback: assign probability 1.0 to predicted class
                 if leaf.predicted_class is None:
                     continue
-                proba[mask, classes.index(leaf.predicted_class)] = 1.0
+                class_positions = np.flatnonzero(
+                    np.asarray(classes) == leaf.predicted_class
+                )
+                if len(class_positions):
+                    proba[mask, class_positions[0]] = 1.0
                 continue
 
             total = sum(dist.values())

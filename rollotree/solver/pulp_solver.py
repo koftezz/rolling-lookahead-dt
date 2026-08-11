@@ -10,6 +10,7 @@ from pulp import (
     lpSum,
     value,
     LpStatus,
+    LpSolutionIntegerFeasible,
 )
 
 from rollotree.solver.base import OCT2Solution, SolverConfig, SolverStatus
@@ -75,11 +76,20 @@ class PuLPOCT2Solver:
             data_arr, P, min_leaf
         )
 
-        # Fall back to all pairs if elimination removes everything
-        if not valid_x_pairs:
-            valid_x_pairs = {(i, j) for i in P for j in P}
-        if not valid_y_pairs:
-            valid_y_pairs = {(i, j) for i in P for j in P}
+        # Both sides must admit a pair and share at least one root feature.
+        # Falling back to all pairs silently violated min_samples_leaf.
+        valid_left_roots = {i for i, _j in valid_x_pairs}
+        valid_right_roots = {i for i, _j in valid_y_pairs}
+        common_roots = valid_left_roots & valid_right_roots
+        if not valid_x_pairs or not valid_y_pairs or not common_roots:
+            return OCT2Solution(status=SolverStatus.INFEASIBLE)
+
+        valid_x_pairs = sorted(
+            pair for pair in valid_x_pairs if pair[0] in common_roots
+        )
+        valid_y_pairs = sorted(
+            pair for pair in valid_y_pairs if pair[0] in common_roots
+        )
 
         logger.info(
             f"Variable elimination: {len(valid_x_pairs)}/{len(P)**2} x-pairs, "
@@ -135,18 +145,17 @@ class PuLPOCT2Solver:
             return OCT2Solution(status=SolverStatus.INFEASIBLE)
         elif status_str == "Unbounded":
             return OCT2Solution(status=SolverStatus.UNBOUNDED)
-        elif status_str != "Optimal":
-            return OCT2Solution(status=SolverStatus.ERROR)
 
         # Extract solution
-        root_feature = None
+        left_root_feature = None
+        right_root_feature = None
         left_feature = None
         right_feature = None
 
         for (i, j) in valid_x_pairs:
             xval = x[i, j].varValue
             if xval is not None and xval > 0.5:
-                root_feature = i
+                left_root_feature = i
                 left_feature = j
                 logger.info(
                     f"Left split: root feature={i}, second feature={j}"
@@ -155,12 +164,33 @@ class PuLPOCT2Solver:
         for (i, k) in valid_y_pairs:
             yval = y[i, k].varValue
             if yval is not None and yval > 0.5:
-                root_feature = i
+                right_root_feature = i
                 right_feature = k
                 logger.info(
                     f"Right split: root feature={i}, second feature={k}"
                 )
                 break
+
+        complete_incumbent = (
+            left_root_feature is not None
+            and right_root_feature is not None
+            and left_root_feature == right_root_feature
+            and left_feature is not None
+            and right_feature is not None
+        )
+        if not complete_incumbent:
+            if status_str == "Optimal":
+                logger.error("Optimal solve did not contain a complete tree")
+            return OCT2Solution(status=SolverStatus.ERROR)
+
+        root_feature = left_root_feature
+
+        if status_str == "Optimal":
+            solution_status = SolverStatus.OPTIMAL
+        elif getattr(prob, "sol_status", None) == LpSolutionIntegerFeasible:
+            solution_status = SolverStatus.TIME_LIMIT
+        else:
+            return OCT2Solution(status=SolverStatus.ERROR)
 
         # Determine leaf classes by majority vote
         leaf_classes = {}
@@ -179,7 +209,7 @@ class PuLPOCT2Solver:
         logger.info(f"OCT-2 solved. Objective={obj_val}, Runtime={runtime}")
 
         return OCT2Solution(
-            status=SolverStatus.OPTIMAL,
+            status=solution_status,
             root_feature=root_feature,
             left_feature=left_feature,
             right_feature=right_feature,

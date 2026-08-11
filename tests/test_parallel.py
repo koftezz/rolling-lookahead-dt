@@ -66,6 +66,25 @@ class TestSubproblemResultPicklable:
 
 
 class TestSolveSubproblem:
+    def test_expired_deadline_skips_solver(self):
+        df, features, classes = _make_parent_data(n=30)
+        inp = SubproblemInput(
+            parent_node=2,
+            leaf_ids=[4, 5],
+            parent_data=df,
+            features=features,
+            sub_K=classes,
+            y_idx=0,
+            solver_config=SolverConfig(time_limit=60),
+            criterion=GiniCriterion(),
+            deadline=0.0,
+        )
+
+        result = _solve_subproblem(inp)
+
+        assert result.timed_out is True
+        assert result.sub_solution is None
+
     def test_skips_small_datasets(self):
         """With min_samples_split > n_samples, should return skipped=True."""
         df, features, classes = _make_parent_data(n=5)

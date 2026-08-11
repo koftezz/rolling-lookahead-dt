@@ -102,6 +102,47 @@ class TestPuLPOCT2Solver:
         assert solution.left_feature in features
         assert solution.right_feature in features
 
+    def test_feasible_nonoptimal_incumbent_maps_to_time_limit(self, monkeypatch):
+        """A backend time limit with a complete integer tree is usable."""
+        import pulp
+
+        def fake_solve(problem, _solver):
+            for variable in problem.variables():
+                variable.varValue = 0
+            variables = {variable.name: variable for variable in problem.variables()}
+            variables["x_1_2"].varValue = 1
+            variables["y_1_2"].varValue = 1
+            problem.status = pulp.LpStatusNotSolved
+            problem.sol_status = pulp.LpSolutionIntegerFeasible
+            problem.solutionTime = 0.01
+
+        monkeypatch.setattr(pulp.LpProblem, "solve", fake_solve)
+        data, features, classes = self._make_separable_data()
+        solution = PuLPOCT2Solver(
+            SolverConfig(time_limit=0.01), GiniCriterion()
+        ).solve(data, features, classes)
+
+        assert solution.status == SolverStatus.TIME_LIMIT
+        assert solution.root_feature == 1
+        assert set(solution.leaf_classes) == {4, 5, 6, 7}
+
+    def test_time_limit_without_complete_incumbent_is_error(self, monkeypatch):
+        """A backend stop without a complete assignment must not leak a tree."""
+        import pulp
+
+        def fake_solve(problem, _solver):
+            problem.status = pulp.LpStatusNotSolved
+            problem.sol_status = pulp.LpSolutionNoSolutionFound
+
+        monkeypatch.setattr(pulp.LpProblem, "solve", fake_solve)
+        data, features, classes = self._make_separable_data()
+        solution = PuLPOCT2Solver(
+            SolverConfig(time_limit=0.01), GiniCriterion()
+        ).solve(data, features, classes)
+
+        assert solution.status == SolverStatus.ERROR
+        assert solution.root_feature is None
+
 
 class TestSolverBackends:
     """Tests that compare HiGHS and Gurobi results (Gurobi tests are skipped if not installed)."""

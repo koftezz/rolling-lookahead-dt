@@ -16,8 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: pytest
+      - run: python -m pytest -q
 
   publish:
     needs: test
@@ -29,6 +31,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install build
+      - run: pip install build twine
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python -c "import os, pathlib; version={line.split('=', 1)[1].strip().strip(chr(34)) for line in pathlib.Path('rollotree/_version.py').read_text().splitlines() if line.startswith('__version__')} .pop(); expected='v'+version; actual=os.environ['RELEASE_TAG']; assert actual == expected, f'tag {actual} does not match {expected}'"
       - run: python -m build
+      - run: python -m twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
