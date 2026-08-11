@@ -116,7 +116,7 @@ def test_object_backed_binary_values_use_safe_routing_fallback():
 
 def test_mixed_object_values_report_binary_validation_error():
     X, y = _complete_binary_dataset()
-    mixed = X.to_numpy(dtype=object)
+    mixed = X.to_numpy(dtype=object, copy=True)
     mixed[0, 0] = "not-binary"
 
     with pytest.raises(ValueError, match="binary"):
