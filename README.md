@@ -21,9 +21,12 @@ RolloTree builds interpretable decision trees by solving a sequence of small mix
 - **Tree inspection** — `apply()`, `decision_path()`, `get_n_leaves()`, `get_depth()`
 - **Model persistence** — `save()` / `load()` via joblib, plus standard pickle support
 - **Input validation** — clear error messages for non-binary features, single-class targets, and more
+- **Exact depth-3 option** — `initial_depth=3` globally optimizes a complete depth-3 tree over the selected feature set
 - **Two impurity criteria** — Gini index or misclassification error
 - **Arbitrary depth** — depth-2 base tree extended via rolling subtree optimization
 - **Parallel solving** — `n_jobs=-1` to solve independent subproblems across CPU cores
+- **Bounded wide-data search** — reproducible `max_features` sampling and a fit-wide `total_time_limit`
+- **Fit diagnostics** — solver status, objective, runtime, feature count, and skip reason for each subproblem
 
 ## Installation
 
@@ -37,7 +40,7 @@ Or in editable/development mode (from a local clone):
 pip install -e ".[dev]"
 ```
 
-Dependencies: `pulp`, `highspy`, `numpy`, `pandas`, `scipy`, `joblib`.
+Dependencies: `pulp`, `highspy`, `numpy`, `pandas`, `scipy`, `joblib`, `scikit-learn`.
 
 For faster prediction and tree building with [Numba](https://numba.pydata.org/) JIT compilation:
 
@@ -139,6 +142,43 @@ subproblems for each parent node. With `n_jobs > 1` these are dispatched
 across processes via `ProcessPoolExecutor`. Speedup scales with the number
 of parents per level — most effective at depth 4+.
 
+### Exact Depth 3 and Wide Data
+
+The default remains the paper's rolling OCT-2 strategy. To optimize a complete
+depth-3 seed globally, use `initial_depth=3`:
+
+```python
+model = RollingOCT(
+    depth=5,
+    initial_depth=3,       # exact depth-3 seed, then rolling expansion
+    max_features="sqrt",  # fixed seeded subset within each subproblem
+    random_state=42,
+    total_time_limit=300,  # wall-clock budget for the complete fit
+    n_jobs=-1,
+)
+model.fit(X_train, y_train)
+
+print(model.fit_status_, model.actual_depth_, model.fit_time_)
+for diagnostic in model.subproblem_diagnostics_:
+    print(diagnostic.status, diagnostic.objective_value, diagnostic.elapsed_time)
+```
+
+With `depth=3, initial_depth=3`, optimal status certifies the globally optimal
+complete depth-3 tree over the selected feature subset. For larger requested
+depths, only that seed has a global certificate; subsequent levels use rolling
+OCT-2 expansion. The exact initializer explicitly uses a zero MIP gap; passing
+a positive `mip_gap` with `initial_depth=3` raises an error because it cannot
+support a global-optimality certificate. Every populated leaf strictly honors
+`min_samples_leaf`, so infeasible complete trees raise a clear error instead
+of relaxing the contract.
+
+Predictive accuracy is not guaranteed to improve merely because the training
+objective is more optimal. The bundled paired Wine benchmark found lower Gini
+but no held-out accuracy gain, at roughly 2.5-3.7x runtime. See
+[`benchmarks/QUALITY_RESULTS.md`](benchmarks/QUALITY_RESULTS.md) for the
+depth-3/4/5 comparison and run `python benchmarks/bench_quality.py` on the
+target workload before choosing the seed strategy.
+
 ## API Reference
 
 ### `RollingOCT`
@@ -155,6 +195,10 @@ RollingOCT(
     min_samples_split=2,  # Min samples to solve a subproblem
     min_samples_leaf=1,   # Min samples per leaf node
     n_jobs=1,             # Parallel workers: 1=sequential, -1=all cores
+    max_features=None,    # None, int, fraction, "sqrt", or "log2"
+    random_state=None,    # Reproducible feature subsets
+    total_time_limit=None,# Wall-clock budget for the whole fit
+    initial_depth=2,      # Exact seed depth: 2 or 3
 )
 ```
 
@@ -168,8 +212,8 @@ RollingOCT(
 | `score(X, y)` | Return accuracy (fraction correct). |
 | `apply(X)` | Return leaf node IDs for each sample. |
 | `decision_path(X)` | Return sparse CSR matrix of nodes visited by each sample. |
-| `get_n_leaves()` | Return number of active (non-pruned) leaf nodes. |
-| `get_depth()` | Return the actual depth of the deepest active path. |
+| `get_n_leaves()` | Return the number of populated terminal leaves. |
+| `get_depth()` | Return the actual depth of the deepest populated path. |
 | `get_params()` | Return dict of estimator parameters (sklearn protocol). |
 | `set_params(**params)` | Set estimator parameters (sklearn protocol). Returns `self`. |
 | `save(path)` | Save the fitted model to a file (joblib). |
@@ -181,11 +225,15 @@ RollingOCT(
 |-----------|-------------|
 | `tree_` | The fitted `DecisionTree` object |
 | `depth_results_` | Dict mapping depth → `DepthResult(depth, training_accuracy, test_accuracy, elapsed_time)` |
-| `classes_` | Sorted list of unique class labels |
+| `classes_` | Sorted numpy array of unique class labels |
 | `features_` | List of feature indices used |
 | `feature_importances_` | Feature importance array (split frequency, normalized to sum to 1) |
 | `n_features_in_` | Number of features seen during `fit()` |
 | `feature_names_in_` | Feature names (when `X` is a DataFrame) |
+| `fit_status_` | `"completed"`, `"early_stopped"`, or `"time_limit"` |
+| `fit_time_` | Complete wall-clock fit time in seconds |
+| `actual_depth_` | Deepest populated terminal path |
+| `subproblem_diagnostics_` | Ordered per-solve status, timing, feature-count, and candidate-feature records |
 
 **Visualization functions:**
 
@@ -238,6 +286,7 @@ rollotree/
     solver/
         base.py              # SolverStatus, OCT2Solution, SolverConfig
         pulp_solver.py       # PuLPOCT2Solver (HiGHS / Gurobi / CBC)
+        depth3.py            # Exact depth-3 root enumeration
     rolling/
         optimizer.py         # RollingOptimizer, DepthResult
         parallel.py          # Multiprocessing worker for subproblem solving
@@ -245,7 +294,7 @@ rollotree/
         helpers.py           # Data binarization and preprocessing
     data/
         train.csv, test.csv  # Example Wine dataset
-tests/                       # 129 pytest test cases
+tests/                       # Unit, integration, solver, and API regression tests
 benchmarks/                  # Performance benchmarks
 examples/                    # Jupyter notebooks
 ```

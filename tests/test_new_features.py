@@ -239,7 +239,7 @@ class TestModelPersistence:
         model.save(path)
         loaded = RollingOCT.load(path)
         np.testing.assert_array_equal(loaded.predict(X), preds_before)
-        assert loaded.classes_ == model.classes_
+        np.testing.assert_array_equal(loaded.classes_, model.classes_)
         assert loaded.depth == model.depth
 
     def test_save_load_proba_preserved(self, fitted_model_2class, tmp_path):
@@ -295,9 +295,12 @@ class TestInputValidation:
 
     def test_feature_names_stored_from_dataframe(self):
         X = pd.DataFrame(
-            {"age": [0, 1, 0, 1], "income": [1, 0, 1, 0]},
+            {
+                "age": [0, 0, 1, 1, 0, 0, 1, 1],
+                "income": [0, 1, 0, 1, 0, 1, 0, 1],
+            },
         )
-        y = np.array([1, 2, 1, 2])
+        y = np.array([1, 2, 1, 2, 2, 1, 2, 1])
         model = RollingOCT(depth=2)
         model.fit(X, y)
         np.testing.assert_array_equal(

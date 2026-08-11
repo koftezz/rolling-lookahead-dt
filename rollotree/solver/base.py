@@ -66,3 +66,17 @@ class SolverConfig:
             raise ValueError(
                 f"Unknown solver '{solver_name}'. Choose 'highs', 'gurobi', or 'cbc'."
             )
+
+    def copy_with(self, **changes) -> "SolverConfig":
+        """Return a copy with selected values replaced."""
+        values = {
+            "solver_name": self.solver_name,
+            "time_limit": self.time_limit,
+            "mip_gap": self.mip_gap,
+            "log_to_console": self.log_to_console,
+            "big_m": self.big_m,
+            "min_samples_split": self.min_samples_split,
+            "min_samples_leaf": self.min_samples_leaf,
+        }
+        values.update(changes)
+        return SolverConfig(**values)

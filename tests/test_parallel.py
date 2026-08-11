@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import time
 
 import numpy as np
 import pandas as pd
@@ -66,6 +67,58 @@ class TestSubproblemResultPicklable:
 
 
 class TestSolveSubproblem:
+    def test_deadline_uses_process_independent_wall_clock(self, monkeypatch):
+        """Worker deadline and parent deadline must share the same epoch."""
+        captured = {}
+
+        class FakeSolver:
+            def __init__(self, config, criterion):
+                captured["time_limit"] = config.time_limit
+
+            def solve(self, **_kwargs):
+                from rollotree.solver.base import OCT2Solution
+
+                return OCT2Solution(status=SolverStatus.ERROR)
+
+        monkeypatch.setattr(
+            "rollotree.solver.pulp_solver.PuLPOCT2Solver", FakeSolver
+        )
+        df, features, classes = _make_parent_data(n=30)
+        inp = SubproblemInput(
+            parent_node=2,
+            leaf_ids=[4, 5],
+            parent_data=df,
+            features=features,
+            sub_K=classes,
+            y_idx=0,
+            solver_config=SolverConfig(time_limit=60),
+            criterion=GiniCriterion(),
+            deadline=time.time() + 5,
+        )
+
+        _solve_subproblem(inp)
+
+        assert 0 < captured["time_limit"] <= 5
+
+    def test_expired_deadline_skips_solver(self):
+        df, features, classes = _make_parent_data(n=30)
+        inp = SubproblemInput(
+            parent_node=2,
+            leaf_ids=[4, 5],
+            parent_data=df,
+            features=features,
+            sub_K=classes,
+            y_idx=0,
+            solver_config=SolverConfig(time_limit=60),
+            criterion=GiniCriterion(),
+            deadline=0.0,
+        )
+
+        result = _solve_subproblem(inp)
+
+        assert result.timed_out is True
+        assert result.sub_solution is None
+
     def test_skips_small_datasets(self):
         """With min_samples_split > n_samples, should return skipped=True."""
         df, features, classes = _make_parent_data(n=5)

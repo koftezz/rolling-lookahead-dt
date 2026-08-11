@@ -8,6 +8,7 @@ the solution plus misclassified-leaf information.
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -33,6 +34,7 @@ class SubproblemInput:
     y_idx: int
     solver_config: SolverConfig
     criterion: ImpurityCriterion
+    deadline: Optional[float] = None
 
 
 @dataclass
@@ -46,6 +48,8 @@ class SubproblemResult:
     skipped: bool
     n_samples: int
     parent_data: pd.DataFrame
+    elapsed_time: float = 0.0
+    timed_out: bool = False
 
 
 def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
@@ -56,6 +60,7 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
     misclassified leaves.
     """
     n_samples = len(inp.parent_data)
+    started_at = time.perf_counter()
 
     if n_samples < inp.solver_config.min_samples_split:
         return SubproblemResult(
@@ -66,12 +71,32 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
             skipped=True,
             n_samples=n_samples,
             parent_data=inp.parent_data,
+            elapsed_time=time.perf_counter() - started_at,
+        )
+
+    solver_config = inp.solver_config
+    if inp.deadline is not None:
+        remaining = inp.deadline - time.time()
+        if remaining <= 0:
+            return SubproblemResult(
+                parent_node=inp.parent_node,
+                leaf_ids=inp.leaf_ids,
+                sub_solution=None,
+                sub_misclassified=[],
+                skipped=False,
+                n_samples=n_samples,
+                parent_data=inp.parent_data,
+                elapsed_time=time.perf_counter() - started_at,
+                timed_out=True,
+            )
+        solver_config = solver_config.copy_with(
+            time_limit=min(solver_config.time_limit, max(0.001, remaining))
         )
 
     # Fresh solver per process — PuLP solver objects are not picklable
     from rollotree.solver.pulp_solver import PuLPOCT2Solver
 
-    solver = PuLPOCT2Solver(config=inp.solver_config, criterion=inp.criterion)
+    solver = PuLPOCT2Solver(config=solver_config, criterion=inp.criterion)
     sub_solution = solver.solve(
         data=inp.parent_data,
         features=inp.features,
@@ -88,6 +113,7 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
             skipped=False,
             n_samples=n_samples,
             parent_data=inp.parent_data,
+            elapsed_time=time.perf_counter() - started_at,
         )
 
     # Build temporary sub-tree to identify misclassified leaves
@@ -110,6 +136,7 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
         skipped=False,
         n_samples=n_samples,
         parent_data=inp.parent_data,
+        elapsed_time=time.perf_counter() - started_at,
     )
 
 
