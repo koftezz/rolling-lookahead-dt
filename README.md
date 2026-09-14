@@ -318,3 +318,21 @@ A preprint is also available on [arXiv (2304.10830)](https://arxiv.org/abs/2304.
 ## Contact
 
 Feel free to [reach out](mailto:batuhan.organ@ozu.edu.tr) with questions or feedback.
+
+### Direct local optimization
+
+`RollingOCT(solver="direct")` opts into exact additive OCT-2 minimization.
+For each root, feasible left and right child choices are independent: minimize
+both costs and then choose the cheapest root. Support filtering is unchanged.
+Ties follow supplied candidate order (root, then left child, then right child);
+equal-objective trees from different backends can predict differently.
+The scan is O(p²), in addition to coefficient calculation, and initially stores
+quadratic pair tables. External-solver `time_limit` does not interrupt direct
+coefficient work. HiGHS remains the default.
+
+This is local exactness over supplied binary candidates, not global optimality
+of the final rolling tree. Cross-branch constraints can break the decomposition.
+Misclassification objectives are counts, not rates. Gini is weighted by leaf
+sample fraction; combining subset objectives requires subset-size weighting.
+The corresponding LP has integral vertices, but tied optimal vertices can have
+fractional convex combinations that are also optimal points.

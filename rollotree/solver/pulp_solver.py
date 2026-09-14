@@ -1,6 +1,7 @@
 """PuLP-based OCT-2 solver supporting HiGHS and Gurobi backends."""
 
 import logging
+import time
 import numpy as np
 import pandas as pd
 from pulp import (
@@ -54,6 +55,12 @@ class PuLPOCT2Solver:
         Returns:
             OCT2Solution with extracted tree structure.
         """
+        if self.config.solver_name == "direct":
+            from rollotree.solver.direct import DirectOCT2Solver
+            return DirectOCT2Solver(self.config, self.criterion).solve(
+                data, features, classes, y_idx
+            )
+        started = time.perf_counter()
         P = features
         K = classes
         leaf_paths = get_leaf_paths_depth2()
@@ -69,6 +76,9 @@ class PuLPOCT2Solver:
             classes=K,
             y_idx=y_idx,
         )
+
+        coefficient_time = time.perf_counter() - started
+        assembly_started = time.perf_counter()
 
         # Determine which (i,j) pairs to keep based on min_samples_leaf
         # Uses matrix multiply to compute all co-occurrence counts at once
@@ -117,8 +127,8 @@ class PuLPOCT2Solver:
 
         # Constraint 3: same root feature for both subtrees
         for i in P:
-            x_sum = lpSum(x[i, j] for j in P if (i, j) in valid_x_pairs)
-            y_sum = lpSum(y[i, k] for k in P if (i, k) in valid_y_pairs)
+            x_sum = lpSum(x[i, j] for j in P if (i, j) in x)
+            y_sum = lpSum(y[i, k] for k in P if (i, k) in y)
             prob += (x_sum == y_sum, f"same_root_{i}")
 
         # Objective: minimize total impurity across all 4 leaves
@@ -138,6 +148,7 @@ class PuLPOCT2Solver:
         solver = self._get_solver()
 
         logger.info("Solving OCT-2 formulation...")
+        assembly_time = time.perf_counter() - assembly_started
         prob.solve(solver)
         status_str = LpStatus.get(prob.status, "Undefined")
         logger.info(f"Solver status: {status_str}")
@@ -172,7 +183,15 @@ class PuLPOCT2Solver:
                 )
                 break
 
+        def one_hot(variables):
+            values = [v.varValue for v in variables.values()]
+            return (all(v is not None and np.isfinite(v) and
+                        min(abs(v), abs(v - 1)) <= 1e-6 for v in values)
+                    and abs(sum(values) - 1) <= 1e-6)
+
         complete_incumbent = (
+            one_hot(x) and one_hot(y)
+            and
             left_root_feature is not None
             and right_root_feature is not None
             and left_root_feature == right_root_feature
@@ -212,7 +231,14 @@ class PuLPOCT2Solver:
                 values, counts = np.unique(arr2[:, y_idx], return_counts=True)
                 leaf_classes[leaf] = values[np.argmax(counts)]
 
-        obj_val = value(prob.objective)
+        # Rescore the validated integer assignment; CBC may leave its
+        # constant-objective dummy variable unset even at a true optimum.
+        obj_val = float(
+            coef_dict[4][root_feature, left_feature]
+            + coef_dict[5][root_feature, left_feature]
+            + coef_dict[6][root_feature, right_feature]
+            + coef_dict[7][root_feature, right_feature]
+        )
         runtime = getattr(prob, "solutionTime", None)
 
         logger.info(f"OCT-2 solved. Objective={obj_val}, Runtime={runtime}")
@@ -226,6 +252,8 @@ class PuLPOCT2Solver:
             objective_value=obj_val,
             runtime=runtime,
             mip_gap=None,
+            coefficient_time=coefficient_time,
+            assembly_time=assembly_time,
         )
 
     @staticmethod

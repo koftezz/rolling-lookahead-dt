@@ -24,6 +24,9 @@ class OCT2Solution:
     leaf_classes: Optional[dict] = field(default_factory=dict)
     objective_value: Optional[float] = None
     runtime: Optional[float] = None
+    coefficient_time: Optional[float] = None
+    assembly_time: Optional[float] = None
+    root_costs: dict = field(default_factory=dict)
     mip_gap: Optional[float] = None
 
 
@@ -62,9 +65,9 @@ class SolverConfig:
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
 
-        if self.solver_name not in ("highs", "gurobi", "cbc"):
+        if self.solver_name not in ("highs", "gurobi", "cbc", "direct"):
             raise ValueError(
-                f"Unknown solver '{solver_name}'. Choose 'highs', 'gurobi', or 'cbc'."
+                f"Unknown solver '{solver_name}'. Choose 'highs', 'gurobi', 'cbc', or 'direct'."
             )
 
     def copy_with(self, **changes) -> "SolverConfig":
