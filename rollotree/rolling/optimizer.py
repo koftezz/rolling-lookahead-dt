@@ -305,6 +305,7 @@ class RollingOptimizer:
     ) -> Tuple[DecisionTree, Dict[int, DepthResult]]:
         """Build a tree and return accepted per-depth results."""
         self.fit_status_ = "completed"
+        self._stopping_reason = "requested_depth_reached"
         self._target_depth = target_depth
         self.audit_count_ = 0
         self.audit_time_ = 0.0
@@ -352,6 +353,7 @@ class RollingOptimizer:
 
         if initial_status == SolverStatus.TIME_LIMIT:
             self.fit_status_ = "time_limit"
+            self._stopping_reason = "initial_solver_time_limit"
             self._warn_timeout()
         elif target_depth > self.initial_depth:
             tree = self._rolling_expand(
@@ -371,7 +373,8 @@ class RollingOptimizer:
         if remaining is not None and remaining <= 0 and self.fit_status_ != "time_limit":
             self.fit_status_ = "time_limit"
             self._warn_timeout()
-        self._record(event="stop", stopping_reason=self.fit_status_, depth=tree.get_depth())
+        self._record(event="stop", status=self.fit_status_, stopping_reason=(
+            "solver_or_fit_budget_exhausted" if self.fit_status_ == "time_limit" else self._stopping_reason), depth=tree.get_depth())
         self.actual_depth_ = tree.get_depth()
         self.fit_time_ = time.perf_counter() - self._started_at
         return tree, results
@@ -402,6 +405,7 @@ class RollingOptimizer:
                 and (leaf_id // 2).bit_length() - 1 + 2 <= target_depth
             ]
             if not eligible:
+                self._stopping_reason = "no_eligible_misclassified_leaves"
                 if tree.get_depth() < target_depth:
                     self.fit_status_ = "early_stopped"
                 break
@@ -485,7 +489,8 @@ class RollingOptimizer:
                     SolverStatus.TIME_LIMIT,
                 ):
                     status = solution.status.value
-                    skip_reason = "solver_failure"
+                    skip_reason = "no_incumbent" if solution.status == SolverStatus.TIME_LIMIT else "solver_failure"
+                    saw_timeout |= solution.status == SolverStatus.TIME_LIMIT
                     blocked_leaves.update(result.leaf_ids)
                 else:
                     status = solution.status.value
@@ -542,6 +547,7 @@ class RollingOptimizer:
                 )
 
             if merged == 0:
+                self._stopping_reason = "no_accepted_replacements"
                 tree = snapshot
                 remaining = self._remaining_time()
                 if saw_timeout or (remaining is not None and remaining <= 0):
@@ -563,6 +569,7 @@ class RollingOptimizer:
                 tree, X_train, y_train, X_test, y_test
             )
             if self.acceptance_policy == "accuracy" and train_accuracy + 1e-10 < previous_accuracy:
+                self._stopping_reason = "level_accuracy_regression"
                 for event in self.search_trace_[trace_start:]:
                     if event.get("accepted"):
                         event.update(accepted=False, reason="level_accuracy_regression")

@@ -65,6 +65,10 @@ def worker(name, seed, method, budget):
         params.update(initial_depth=3, depth=3)
     elif method in ("gap", "random", "impurity", "samples", "fixed"):
         params.update(adaptive_lookahead=method)
+        if method == "samples":
+            params.update(audit_min_samples=64)
+        elif method == "impurity":
+            params.update(audit_threshold=0.1)
     row = dict(dataset=name, seed=seed, method=method, budget=budget, n_train=len(train),
                n_test=len(test), n_features=binary.shape[1], n_classes=len(np.unique(y)),
                class_counts=np.bincount(y[train]).tolist(), preprocessing_seconds=prep,
