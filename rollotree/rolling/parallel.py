@@ -104,7 +104,7 @@ def _solve_subproblem(inp: SubproblemInput) -> SubproblemResult:
         y_idx=inp.y_idx,
     )
 
-    if sub_solution.status not in (SolverStatus.OPTIMAL, SolverStatus.TIME_LIMIT):
+    if sub_solution.root_feature is None or sub_solution.status not in (SolverStatus.OPTIMAL, SolverStatus.TIME_LIMIT):
         return SubproblemResult(
             parent_node=inp.parent_node,
             leaf_ids=inp.leaf_ids,

@@ -318,3 +318,111 @@ A preprint is also available on [arXiv (2304.10830)](https://arxiv.org/abs/2304.
 ## Contact
 
 Feel free to [reach out](mailto:batuhan.organ@ozu.edu.tr) with questions or feedback.
+
+### Direct local optimization
+
+`RollingOCT(solver="direct")` opts into exact additive OCT-2 minimization.
+For each root, feasible left and right child choices are independent: minimize
+both costs and then choose the cheapest root. Support filtering is unchanged.
+Ties follow supplied candidate order (root, then left child, then right child);
+equal-objective trees from different backends can predict differently.
+The scan is O(p²), in addition to coefficient calculation, and initially stores
+quadratic pair tables. External-solver `time_limit` does not interrupt direct
+coefficient work. HiGHS remains the default.
+
+This is local exactness over supplied binary candidates, not global optimality
+of the final rolling tree. Cross-branch constraints can break the decomposition.
+Misclassification objectives are counts, not rates. Gini is weighted by leaf
+sample fraction; combining subset objectives requires subset-size weighting.
+The corresponding LP has integral vertices, but tied optimal vertices can have
+fractional convex combinations that are also optimal points.
+
+### Acceptance and search traces
+
+`acceptance_policy="accuracy"` retains the existing level-wide accuracy guard:
+all replacements in a level are reverted if full training accuracy falls by
+more than 1e-10. Individual replacements may trade accuracy within that level.
+`acceptance_policy="objective"` independently scores each affected subset before
+and after replacement and rejects objective increases above 1e-10. Scores use
+raw routed labels, not solver coefficients. Gini trace scores are normalized
+within that subset; multiply by `n_samples / training_n` before adding across
+subsets. Misclassification trace scores are counts and add directly. Neither
+policy promises held-out improvement.
+
+Set `trace=True` for JSON-serializable `search_trace_` events: initial solves,
+initial acceptance, attempted updates, and final stopping status. No raw rows
+are recorded. Update records include node/depth, subset/candidate sizes, backend,
+status, before/after objective and accuracy, timings, decision/reason, and budget
+remaining. A level rollback marks its attempted replacements rejected.
+Existing `subproblem_diagnostics_` remains available independently.
+
+`time_limit` applies per external solver call. `total_time_limit` is a cooperative
+fit budget checked at solve/expansion boundaries; coefficient calculation,
+model construction and dispatched calls can overrun it. This is not a hard
+wall-clock deadline. An incumbent is retained on exhaustion; initialization
+without an incumbent raises. Coefficient timing covers coefficients (and direct
+support filtering); assembly covers external support filtering/model setup;
+solve timing covers the backend call or direct cost scan. Missing timings are
+`None`, not zero. Direct assembly is zero because no external model is built.
+
+### Blocked direct optimization
+
+`solver="direct", direct_block_size=8` processes root candidates eight at a
+time. Temporary pair statistics use O(bp) storage and stream over classes;
+input matrices and class-selected copies use O(np) separately. No quadratic
+support precheck is used on the blocked depth-3 path. The default `None` retains
+the unblocked implementation. Blocked fits use sequential solves even when
+`n_jobs` requests parallel execution, to avoid multiplying memory consumption.
+
+The fit deadline is checked between root blocks, not inside matrix operations.
+Partial searches return TIME_LIMIT with a feasible incumbent when available,
+no optimality certificate and no invented gap. Before the first feasible root,
+there may be no incumbent. Candidate-order tie-breaking matches unblocked direct.
+Run `python benchmarks/bench_direct.py` for fresh-process RSS and timing data;
+RSS includes interpreter, dependencies, and inputs, not just pair costs.
+
+### Experimental adaptive lookahead and offline diagnostics
+
+`adaptive_lookahead=None` is the unchanged default. With `solver="direct"`, opt
+into `"gap"`, `"impurity"`, `"samples"`, `"random"`, or `"fixed"`. The initial
+OCT-2 and each rolling replacement retain a feasible baseline. An eligible node
+with at least three remaining levels may receive one exact depth-3 audit;
+independent routed scoring must agree with its reported objective, and the
+configured acceptance policy must accept it against the baseline. Subsequent
+replacement/level acceptance still applies. Failed or unusable audits retain
+the baseline. This does not revise ancestors that were already committed.
+
+`audit_budget=2` limits the number of audits across the fit, including the root.
+`audit_min_samples=32` is a sample floor; samples selection audits every node
+above this floor. Fixed selection uses the same floor and audits every eligible
+node until the budget is used. Gap selection requires the best two root costs
+to differ by at most `audit_threshold=0.02`. Impurity selection requires residual
+objective at least that threshold. Counts are divided by subset size for these
+heuristics. Random selection uses a seeded 50% decision per eligible node and
+may spend less than its count allowance. Nodes are visited deterministically,
+not globally ranked. `audit_count_` and `audit_time_` expose actual expenditure.
+Budgets are allowances, not a promise that different selectors spend equal time.
+There is no learned allocator. Controlled-perturbation signals are offline only.
+
+`rollotree.diagnostics.commitment_regret(...)` performs expensive shallow,
+fixed-root depth-3 and free-root depth-3 solves with identical candidates,
+support rules and objective units. `ExactDepth3Solver.solve(fixed_root=...)`
+restricts only the top root, retaining all child candidates. Exact regret is
+reported only when all required solves are optimal; otherwise it is `None`.
+It measures the cost of keeping the shallow root at depth 3, not final rolling
+tree quality. A small root gap is not a regret certificate and requires empirical
+evaluation. See the reproducible experiments for failures of this hypothesis.
+
+Related work predates this extension: [anytime lookahead induction](https://csaws.cs.technion.ac.il/~shaulm/papers/abstracts/Esmeir-2004-LBA.html),
+[variable-depth lookahead](https://www.bgu.ac.il/en/researcher/mark-last/publications/39521646/),
+and [MurTree](https://jmlr.org/papers/v23/20-520.html). We make no novelty claim.
+This is a bounded experimental implementation, not evidence of improved
+held-out accuracy or an established quality–compute advantage.
+
+### Reproducible evidence
+
+See [the lookahead pilot report](benchmarks/LOOKAHEAD_RESULTS.md) for measured
+runtime/RSS, exact commitment diagnostics, paired train/test experiments,
+negative results, and reproduction commands. The study establishes no general
+adaptive-selector advantage. Tracing overhead counts toward cooperative fit
+budgets, so results near a binding deadline can vary with system load.

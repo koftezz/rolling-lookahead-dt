@@ -183,7 +183,7 @@ def _solve_candidate(inp: _CandidateInput) -> _CandidateResult:
         if remaining <= 0:
             return None
         return inp.config.copy_with(
-            time_limit=min(inp.config.time_limit, max(0.001, remaining))
+            time_limit=min(inp.config.time_limit, max(0.001, remaining)), deadline=inp.deadline
         )
 
     if config_with_remaining_time() is None:
@@ -201,10 +201,10 @@ def _solve_candidate(inp: _CandidateInput) -> _CandidateResult:
         )
         return _CandidateResult(diagnostic=diagnostic)
 
-    left_feasible = _complete_oct2_is_feasible(
+    left_feasible = inp.config.solver_name == "direct" or _complete_oct2_is_feasible(
         left_arr, inp.features, inp.config.min_samples_leaf
     )
-    right_feasible = _complete_oct2_is_feasible(
+    right_feasible = inp.config.solver_name == "direct" or _complete_oct2_is_feasible(
         right_arr, inp.features, inp.config.min_samples_leaf
     )
     if not left_feasible or not right_feasible:
@@ -386,6 +386,7 @@ class ExactDepth3Solver:
         classes: Sequence,
         y_idx: int = 0,
         feature_subset: Optional[Sequence[int]] = None,
+        fixed_root: Optional[int] = None,
     ) -> OCT3Solution:
         """Solve an exact depth-3 tree over ``feature_subset``.
 
@@ -409,6 +410,9 @@ class ExactDepth3Solver:
         if unknown:
             raise ValueError(f"feature_subset contains unknown features: {unknown}")
 
+        if fixed_root is not None and fixed_root not in selected:
+            raise ValueError("fixed_root must belong to the candidate feature set")
+        roots = selected if fixed_root is None else (fixed_root,)
         inputs = [
             _CandidateInput(
                 root_feature=root_feature,
@@ -420,9 +424,11 @@ class ExactDepth3Solver:
                 criterion=self.criterion,
                 deadline=self.deadline,
             )
-            for root_feature in selected
+            for root_feature in roots
         ]
         workers = min(_resolve_n_jobs(self.n_jobs), len(inputs))
+        if self.config.solver_name == "direct" and self.config.direct_block_size is not None:
+            workers = 1
         if workers > 1 and len(inputs) > 1:
             try:
                 with ProcessPoolExecutor(max_workers=workers) as pool:

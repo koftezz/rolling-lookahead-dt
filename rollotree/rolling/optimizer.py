@@ -96,6 +96,12 @@ class RollingOptimizer:
         random_state: Optional[int] = None,
         total_time_limit: Optional[float] = None,
         initial_depth: int = 2,
+        acceptance_policy: str = "accuracy",
+        trace: bool = False,
+        adaptive_lookahead=None,
+        audit_budget=2,
+        audit_threshold=0.02,
+        audit_min_samples=32,
     ):
         self.solver_config = solver_config
         self.criterion = criterion
@@ -104,6 +110,15 @@ class RollingOptimizer:
         self.random_state = random_state
         self.total_time_limit = total_time_limit
         self.initial_depth = initial_depth
+        self.acceptance_policy = acceptance_policy
+        self.trace = trace
+        self.adaptive_lookahead = adaptive_lookahead
+        self.audit_budget = audit_budget
+        self.audit_threshold = audit_threshold
+        self.audit_min_samples = audit_min_samples
+        self.audit_count_ = 0
+        self.audit_time_ = 0.0
+        self.search_trace_ = []
 
         self.fit_status_ = "completed"
         self.fit_time_ = 0.0
@@ -112,6 +127,11 @@ class RollingOptimizer:
         self._started_at = 0.0
         self._deadline = None
         self._base_seed = None
+
+    def _record(self, **event):
+        if self.trace:
+            self.search_trace_.append(dict(backend=self.solver_config.solver_name,
+                remaining_budget=self._remaining_time(), **event))
 
     def _remaining_time(self) -> Optional[float]:
         if self._deadline is None:
@@ -125,7 +145,7 @@ class RollingOptimizer:
         limit = self.solver_config.time_limit
         if remaining is not None:
             limit = min(limit, max(0.001, remaining))
-        return self.solver_config.copy_with(time_limit=limit)
+        return self.solver_config.copy_with(time_limit=limit, deadline=self._deadline)
 
     def _select_features(
         self, features: list, depth: int, parent_node: int
@@ -169,6 +189,10 @@ class RollingOptimizer:
             y_idx=y_idx,
         )
         elapsed = time.perf_counter() - started
+        self._record(event="initial_solve", node=1, depth=0, n_samples=len(train_data),
+                     n_features=len(candidate_features), status=solution.status.value,
+                     coefficient_time=solution.coefficient_time, assembly_time=solution.assembly_time,
+                     solve_time=solution.runtime, proposed_objective=solution.objective_value)
         self.subproblem_diagnostics_.append(
             SubproblemDiagnostic(
                 depth=2,
@@ -191,12 +215,17 @@ class RollingOptimizer:
                 )
             raise RuntimeError(f"Initial OCT-2 solve failed: {solution.status}")
 
+        if solution.root_feature is None:
+            raise TimeoutError("Initial OCT-2 budget expired without an incumbent")
         tree = DecisionTree(depth=2, features=features)
         tree.set_branch_feature(1, solution.root_feature)
         tree.set_branch_feature(2, solution.left_feature)
         tree.set_branch_feature(3, solution.right_feature)
         for leaf_id, class_label in solution.leaf_classes.items():
             tree.set_leaf_class(leaf_id, class_label)
+        from rollotree.rolling.adaptive import maybe_audit
+        tree = maybe_audit(self, tree, solution, train_data, candidate_features,
+                           1, self._target_depth, y_idx)
         return tree, solution.status
 
     def _build_initial_tree(self, train_data, features, classes, y_idx):
@@ -276,7 +305,12 @@ class RollingOptimizer:
     ) -> Tuple[DecisionTree, Dict[int, DepthResult]]:
         """Build a tree and return accepted per-depth results."""
         self.fit_status_ = "completed"
+        self._stopping_reason = "requested_depth_reached"
+        self._target_depth = target_depth
+        self.audit_count_ = 0
+        self.audit_time_ = 0.0
         self.subproblem_diagnostics_ = []
+        self.search_trace_ = []
         self._started_at = time.perf_counter()
         # Deadline values cross process boundaries. Python 3.9 on macOS does
         # not guarantee a common ``perf_counter`` reference point between
@@ -304,16 +338,22 @@ class RollingOptimizer:
             tree, X_train, y_train, X_test, y_test
         )
         results = {
-            self.initial_depth: DepthResult(
-                depth=self.initial_depth,
+            tree.get_depth(): DepthResult(
+                depth=tree.get_depth(),
                 training_accuracy=train_accuracy,
                 test_accuracy=test_accuracy,
                 elapsed_time=time.perf_counter() - initial_started,
             )
         }
 
+        from rollotree.tree.scoring import score_tree
+        self._record(event="initial", node=1, depth=0, n_samples=len(train_data),
+                     accepted=True, proposed_objective=(score_tree(tree, X_train, y_train, self.criterion) if self.trace else None),
+                     proposed_accuracy=train_accuracy, status=initial_status.value)
+
         if initial_status == SolverStatus.TIME_LIMIT:
             self.fit_status_ = "time_limit"
+            self._stopping_reason = "initial_solver_time_limit"
             self._warn_timeout()
         elif target_depth > self.initial_depth:
             tree = self._rolling_expand(
@@ -329,6 +369,12 @@ class RollingOptimizer:
                 results,
             )
 
+        remaining = self._remaining_time()
+        if remaining is not None and remaining <= 0 and self.fit_status_ != "time_limit":
+            self.fit_status_ = "time_limit"
+            self._warn_timeout()
+        self._record(event="stop", status=self.fit_status_, stopping_reason=(
+            "solver_or_fit_budget_exhausted" if self.fit_status_ == "time_limit" else self._stopping_reason), depth=tree.get_depth())
         self.actual_depth_ = tree.get_depth()
         self.fit_time_ = time.perf_counter() - self._started_at
         return tree, results
@@ -347,7 +393,7 @@ class RollingOptimizer:
         results,
     ):
         blocked_leaves: set[int] = set()
-        previous_accuracy = results[self.initial_depth].training_accuracy
+        previous_accuracy = next(iter(results.values())).training_accuracy
 
         while True:
             routed_leaf_ids = tree.apply(X_train)
@@ -359,6 +405,7 @@ class RollingOptimizer:
                 and (leaf_id // 2).bit_length() - 1 + 2 <= target_depth
             ]
             if not eligible:
+                self._stopping_reason = "no_eligible_misclassified_leaves"
                 if tree.get_depth() < target_depth:
                     self.fit_status_ = "early_stopped"
                 break
@@ -410,6 +457,7 @@ class RollingOptimizer:
             level_started = time.perf_counter()
             results_list = self._solve_inputs(inputs)
             snapshot = copy.deepcopy(tree)
+            trace_start = len(self.search_trace_)
             merged = 0
             saw_timeout = False
 
@@ -418,6 +466,15 @@ class RollingOptimizer:
                 inp = input_by_parent[result.parent_node]
                 depth = result.parent_node.bit_length() - 1 + 2
                 solution = result.sub_solution
+                before = copy.deepcopy(tree)
+                from rollotree.tree.scoring import score_tree
+                sub_X = np.asarray(inp.parent_data[features])
+                sub_y = np.asarray(inp.parent_data.iloc[:, y_idx])
+                old_obj = (score_tree(tree, sub_X, sub_y, self.criterion)
+                           if self.trace or self.acceptance_policy == "objective" else None)
+                old_acc = float(np.mean(tree.predict(sub_X) == sub_y))
+                accepted = False
+                new_obj, new_acc = None, None
                 if result.timed_out:
                     status = SolverStatus.TIME_LIMIT.value
                     skip_reason = "total_time_limit"
@@ -427,22 +484,46 @@ class RollingOptimizer:
                     status = "skipped_min_samples"
                     skip_reason = "min_samples_split"
                     blocked_leaves.update(result.leaf_ids)
-                elif solution.status not in (
+                elif solution.root_feature is None or solution.status not in (
                     SolverStatus.OPTIMAL,
                     SolverStatus.TIME_LIMIT,
                 ):
                     status = solution.status.value
-                    skip_reason = "solver_failure"
+                    skip_reason = "no_incumbent" if solution.status == SolverStatus.TIME_LIMIT else "solver_failure"
+                    saw_timeout |= solution.status == SolverStatus.TIME_LIMIT
                     blocked_leaves.update(result.leaf_ids)
                 else:
                     status = solution.status.value
                     skip_reason = None
-                    tree.extend_at_leaf(
-                        result.parent_node, solution, base_depth=2
-                    )
-                    merged += 1
+                    if self.adaptive_lookahead is not None:
+                        from rollotree.rolling.adaptive import maybe_audit, solution_tree, replace_region
+                        baseline = solution_tree(solution, features)
+                        local = maybe_audit(self, baseline, solution, inp.parent_data, inp.features,
+                                            result.parent_node, target_depth-(depth-2), y_idx)
+                        replace_region(tree, local, result.parent_node)
+                    else:
+                        tree.extend_at_leaf(result.parent_node, solution, base_depth=2)
+                    tree.depth = max(tree.depth, depth)
+                    new_obj = (score_tree(tree, sub_X, sub_y, self.criterion)
+                               if self.trace or self.acceptance_policy == "objective" else None)
+                    new_acc = float(np.mean(tree.predict(sub_X) == sub_y))
+                    if self.acceptance_policy == "objective" and new_obj > old_obj + 1e-10:
+                        tree = before
+                        skip_reason = "objective_regression"
+                        blocked_leaves.update(result.leaf_ids)
+                    else:
+                        merged += 1
+                        accepted = True
                     saw_timeout |= solution.status == SolverStatus.TIME_LIMIT
 
+                self._record(event="update", node=result.parent_node, depth=depth-2,
+                    n_samples=result.n_samples, n_features=len(inp.features), status=status,
+                    existing_objective=old_obj, proposed_objective=new_obj,
+                    existing_accuracy=old_acc, proposed_accuracy=new_acc,
+                    coefficient_time=getattr(solution, "coefficient_time", None),
+                    assembly_time=getattr(solution, "assembly_time", None),
+                    solve_time=getattr(solution, "runtime", None), accepted=accepted,
+                    reason=skip_reason or "accepted")
                 self.subproblem_diagnostics_.append(
                     SubproblemDiagnostic(
                         depth=depth,
@@ -466,6 +547,7 @@ class RollingOptimizer:
                 )
 
             if merged == 0:
+                self._stopping_reason = "no_accepted_replacements"
                 tree = snapshot
                 remaining = self._remaining_time()
                 if saw_timeout or (remaining is not None and remaining <= 0):
@@ -486,7 +568,11 @@ class RollingOptimizer:
             train_accuracy, test_accuracy = self._evaluate(
                 tree, X_train, y_train, X_test, y_test
             )
-            if train_accuracy + 1e-10 < previous_accuracy:
+            if self.acceptance_policy == "accuracy" and train_accuracy + 1e-10 < previous_accuracy:
+                self._stopping_reason = "level_accuracy_regression"
+                for event in self.search_trace_[trace_start:]:
+                    if event.get("accepted"):
+                        event.update(accepted=False, reason="level_accuracy_regression")
                 tree = snapshot
                 self.fit_status_ = "early_stopped"
                 self.subproblem_diagnostics_.append(
@@ -524,6 +610,8 @@ class RollingOptimizer:
 
     def _solve_inputs(self, inputs):
         effective_jobs = min(_resolve_n_jobs(self.n_jobs), len(inputs))
+        if self.solver_config.solver_name == "direct" and self.solver_config.direct_block_size is not None:
+            effective_jobs = 1  # preserve the configured per-fit memory envelope
         if effective_jobs <= 1:
             return [_solve_subproblem(item) for item in inputs]
 
