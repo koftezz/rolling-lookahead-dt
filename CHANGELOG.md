@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] - 2026-09-14
+
+### Added
+- Opt-in `solver="direct"` for exact additive local OCT-2 optimization, including rolling expansion and exact depth-3 initialization.
+- Optional `direct_block_size` for memory-efficient root-block optimization with cooperative deadline checks and feasible partial incumbents.
+- Explicit `acceptance_policy="objective"` and optional structured `search_trace_` decision records. Accuracy acceptance remains the default.
+- Fixed-root depth-3 solves and offline exact commitment-regret diagnostics.
+- Experimental adaptive depth-3 audits with deterministic gap, impurity, sample-count, random, and fixed selection, audit budgets, and baseline preservation.
+- Reproducible efficiency and paired quality experiments, raw results, and independent saved-tree verification.
+
+### Fixed
+- Recover CBC constant-zero objectives from validated split assignments, including pure child problems in exact depth-3 initialization.
+- Reject incomplete or fractional solver assignments while preserving solver status distinctions.
+- Remove repeated linear pair-list membership searches during root-consistency model assembly.
+- Report explicit stopping reasons and distinguish budget exhaustion without an incumbent.
+
+### Compatibility and limitations
+- HiGHS, accuracy acceptance, and adaptation disabled remain the defaults.
+- Direct optimality applies to the local additive problem over supplied candidates, not the final rolling tree. Cross-branch constraints can invalidate its decomposition.
+- Fit budgets remain cooperative rather than hard wall-clock limits. Blocked direct fits run sequentially to avoid multiplying memory usage.
+- Adaptive quality results are mixed; the experiments establish no consistent selector advantage or generalization guarantee.
+
 ## [2.1.0] - 2026-08-11
 
 ### Added

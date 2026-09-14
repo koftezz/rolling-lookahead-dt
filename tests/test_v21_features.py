@@ -183,4 +183,6 @@ def test_frozen_leaf_is_still_a_populated_terminal_leaf():
 
 
 def test_public_version_uses_release_source():
-    assert __version__ == "2.1.0"
+    from rollotree._version import __version__ as release_version
+
+    assert __version__ == release_version
