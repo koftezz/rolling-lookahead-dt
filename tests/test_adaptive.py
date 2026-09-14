@@ -79,3 +79,10 @@ def test_inexact_regret_is_not_claimed(monkeypatch):
     record = commitment_regret(data, [1,2,3,4], [0,1], get_criterion("gini"))
     assert not record["exact"]
     assert record["commitment_regret"] is None
+
+
+def test_parallel_direct_matches_serial():
+    X, y, _ = fixture(12)
+    a = RollingOCT(solver="direct", depth=4, n_jobs=1).fit(X, y)
+    b = RollingOCT(solver="direct", depth=4, n_jobs=2).fit(X, y)
+    assert np.array_equal(a.predict(X), b.predict(X))

@@ -11,7 +11,7 @@ def main():
     args=parser.parse_args()
     payload=json.loads(Path(args.input).read_text())
     template=Path(__file__).with_name("trace_viewer_template.html").read_text()
-    encoded=json.dumps(payload).replace("</", "<\/")
+    encoded=json.dumps(payload).replace("</", r"<\/")
     Path(args.output).write_text(template.replace("__MEASURED_DATA__",encoded))
 
 

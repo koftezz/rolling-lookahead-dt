@@ -46,7 +46,7 @@ def dataset(name, seed):
     return X, y
 
 
-def worker(name, seed, method, budget):
+def worker(name, seed, method, budget, policy="objective"):
     start = time.perf_counter()
     X, y = dataset(name, seed)
     indices = np.arange(len(y))
@@ -56,7 +56,7 @@ def worker(name, seed, method, budget):
     binary = X if name in ("xor3", "easy", "noisy") else (X > thresholds).astype(int)
     prep = time.perf_counter()-start
     params = dict(depth=4, solver="direct", direct_block_size=8, criterion="gini",
-                  acceptance_policy="objective", total_time_limit=budget, random_state=seed,
+                  acceptance_policy=policy, total_time_limit=budget, random_state=seed,
                   audit_budget=2, audit_min_samples=32, trace=True)
     if method == "highs":
         params.update(solver="highs", direct_block_size=None)
