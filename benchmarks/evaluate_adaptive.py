@@ -93,7 +93,7 @@ def worker(name, seed, method, budget):
         row.update(fit_seconds=fit_seconds, total_seconds=prep+fit_seconds,
                    training_objective=float(objective), train_accuracy=float(accuracy_score(y[train],train_pred)),
                    test_accuracy=float(accuracy_score(y[test],test_pred)), balanced_accuracy=float(balanced_accuracy_score(y[test],test_pred)),
-                   depth=model.get_depth(), leaves=model.get_n_leaves(), status=status, audit_count=audits,
+                   depth=int(model.get_depth()), leaves=int(model.get_n_leaves()), status=status, audit_count=audits,
                    audit_seconds=audit_time, trace=trace, tree=tree,
                    revised_roots=sum(e.get("adopted_as_candidate", False) and e.get("deeper_root") != e.get("baseline_root") for e in trace),
                    warning_categories=sorted(set(type(w.message).__name__ for w in caught)))
