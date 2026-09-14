@@ -364,3 +364,19 @@ without an incumbent raises. Coefficient timing covers coefficients (and direct
 support filtering); assembly covers external support filtering/model setup;
 solve timing covers the backend call or direct cost scan. Missing timings are
 `None`, not zero. Direct assembly is zero because no external model is built.
+
+### Blocked direct optimization
+
+`solver="direct", direct_block_size=8` processes root candidates eight at a
+time. Temporary pair statistics use O(bp) storage and stream over classes;
+input matrices and class-selected copies use O(np) separately. No quadratic
+support precheck is used on the blocked depth-3 path. The default `None` retains
+the unblocked implementation. Blocked fits use sequential solves even when
+`n_jobs` requests parallel execution, to avoid multiplying memory consumption.
+
+The fit deadline is checked between root blocks, not inside matrix operations.
+Partial searches return TIME_LIMIT with a feasible incumbent when available,
+no optimality certificate and no invented gap. Before the first feasible root,
+there may be no incumbent. Candidate-order tie-breaking matches unblocked direct.
+Run `python benchmarks/bench_direct.py` for fresh-process RSS and timing data;
+RSS includes interpreter, dependencies, and inputs, not just pair costs.

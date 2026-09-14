@@ -56,6 +56,8 @@ class SolverConfig:
         big_m: float = 99,
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
+        direct_block_size: Optional[int] = None,
+        deadline: Optional[float] = None,
     ):
         self.solver_name = solver_name.lower()
         self.time_limit = time_limit
@@ -64,6 +66,10 @@ class SolverConfig:
         self.big_m = big_m
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
+        if direct_block_size is not None and (isinstance(direct_block_size, bool) or not isinstance(direct_block_size, int) or direct_block_size < 1):
+            raise ValueError("direct_block_size must be a positive integer or None")
+        self.direct_block_size = direct_block_size
+        self.deadline = deadline
 
         if self.solver_name not in ("highs", "gurobi", "cbc", "direct"):
             raise ValueError(
@@ -80,6 +86,8 @@ class SolverConfig:
             "big_m": self.big_m,
             "min_samples_split": self.min_samples_split,
             "min_samples_leaf": self.min_samples_leaf,
+            "direct_block_size": self.direct_block_size,
+            "deadline": self.deadline,
         }
         values.update(changes)
         return SolverConfig(**values)

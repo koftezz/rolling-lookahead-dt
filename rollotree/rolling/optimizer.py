@@ -135,7 +135,7 @@ class RollingOptimizer:
         limit = self.solver_config.time_limit
         if remaining is not None:
             limit = min(limit, max(0.001, remaining))
-        return self.solver_config.copy_with(time_limit=limit)
+        return self.solver_config.copy_with(time_limit=limit, deadline=self._deadline)
 
     def _select_features(
         self, features: list, depth: int, parent_node: int
@@ -205,6 +205,8 @@ class RollingOptimizer:
                 )
             raise RuntimeError(f"Initial OCT-2 solve failed: {solution.status}")
 
+        if solution.root_feature is None:
+            raise TimeoutError("Initial OCT-2 budget expired without an incumbent")
         tree = DecisionTree(depth=2, features=features)
         tree.set_branch_feature(1, solution.root_feature)
         tree.set_branch_feature(2, solution.left_feature)
@@ -458,7 +460,7 @@ class RollingOptimizer:
                     status = "skipped_min_samples"
                     skip_reason = "min_samples_split"
                     blocked_leaves.update(result.leaf_ids)
-                elif solution.status not in (
+                elif solution.root_feature is None or solution.status not in (
                     SolverStatus.OPTIMAL,
                     SolverStatus.TIME_LIMIT,
                 ):
@@ -576,6 +578,8 @@ class RollingOptimizer:
 
     def _solve_inputs(self, inputs):
         effective_jobs = min(_resolve_n_jobs(self.n_jobs), len(inputs))
+        if self.solver_config.solver_name == "direct" and self.solver_config.direct_block_size is not None:
+            effective_jobs = 1  # preserve the configured per-fit memory envelope
         if effective_jobs <= 1:
             return [_solve_subproblem(item) for item in inputs]
 

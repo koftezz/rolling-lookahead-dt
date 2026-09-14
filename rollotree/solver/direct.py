@@ -10,6 +10,9 @@ class DirectOCT2Solver:
         self.config, self.criterion = config, criterion
 
     def solve(self, data, features, classes, y_idx=0):
+        if self.config.direct_block_size is not None:
+            from rollotree.solver.blocked import solve_blocked
+            return solve_blocked(self.config, self.criterion, data, features, classes, y_idx)
         from rollotree.solver.pulp_solver import PuLPOCT2Solver
         started = time.perf_counter()
         arr = np.asarray(data)

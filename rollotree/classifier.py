@@ -84,6 +84,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         initial_depth: int = 2,
         acceptance_policy: str = "accuracy",
         trace: bool = False,
+        direct_block_size: int = None,
     ):
         self.depth = depth
         self.criterion = criterion
@@ -101,6 +102,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         self.initial_depth = initial_depth
         self.acceptance_policy = acceptance_policy
         self.trace = trace
+        self.direct_block_size = direct_block_size
         self._is_fitted = False
 
     @property
@@ -154,6 +156,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             big_m=float(self.big_m),
             min_samples_split=int(self.min_samples_split),
             min_samples_leaf=int(self.min_samples_leaf),
+            direct_block_size=self.direct_block_size,
         )
         optimizer = RollingOptimizer(
             solver_config=solver_config,
@@ -240,6 +243,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             "initial_depth": 2,
             "acceptance_policy": "accuracy",
             "trace": False,
+            "direct_block_size": None,
         }
         for name, value in defaults.items():
             if not hasattr(model, name):
