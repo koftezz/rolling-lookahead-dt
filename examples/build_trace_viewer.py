@@ -6,7 +6,7 @@ from pathlib import Path
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("--input",default="benchmarks/adaptive_results.json")
+    parser.add_argument("--input",default="examples/viewer_traces.json")
     parser.add_argument("--output",default="examples/trace_viewer.html")
     args=parser.parse_args()
     payload=json.loads(Path(args.input).read_text())

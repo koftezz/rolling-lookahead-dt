@@ -418,3 +418,11 @@ Related work predates this extension: [anytime lookahead induction](https://csaw
 and [MurTree](https://jmlr.org/papers/v23/20-520.html). We make no novelty claim.
 This is a bounded experimental implementation, not evidence of improved
 held-out accuracy or an established quality–compute advantage.
+
+### Reproducible evidence
+
+See [the lookahead pilot report](benchmarks/LOOKAHEAD_RESULTS.md) for measured
+runtime/RSS, exact commitment diagnostics, paired train/test experiments,
+negative results, and reproduction commands. The study establishes no general
+adaptive-selector advantage. Tracing overhead counts toward cooperative fit
+budgets, so results near a binding deadline can vary with system load.
