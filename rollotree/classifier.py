@@ -85,6 +85,10 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         acceptance_policy: str = "accuracy",
         trace: bool = False,
         direct_block_size: int = None,
+        adaptive_lookahead: str = None,
+        audit_budget: int = 2,
+        audit_threshold: float = 0.02,
+        audit_min_samples: int = 32,
     ):
         self.depth = depth
         self.criterion = criterion
@@ -103,6 +107,10 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         self.acceptance_policy = acceptance_policy
         self.trace = trace
         self.direct_block_size = direct_block_size
+        self.adaptive_lookahead = adaptive_lookahead
+        self.audit_budget = audit_budget
+        self.audit_threshold = audit_threshold
+        self.audit_min_samples = audit_min_samples
         self._is_fitted = False
 
     @property
@@ -168,6 +176,10 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             initial_depth=int(self.initial_depth),
             acceptance_policy=self.acceptance_policy,
             trace=self.trace,
+            adaptive_lookahead=self.adaptive_lookahead,
+            audit_budget=self.audit_budget,
+            audit_threshold=self.audit_threshold,
+            audit_min_samples=self.audit_min_samples,
         )
         self.tree_, self.depth_results_ = optimizer.build_tree(
             train_data=train_df,
@@ -176,6 +188,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             classes=self.classes_.tolist(),
             target_depth=int(self.depth),
         )
+        self.audit_count_ = optimizer.audit_count_
+        self.audit_time_ = optimizer.audit_time_
         self.search_trace_ = optimizer.search_trace_
         self.fit_status_ = optimizer.fit_status_
         self.fit_time_ = optimizer.fit_time_
@@ -244,6 +258,10 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             "acceptance_policy": "accuracy",
             "trace": False,
             "direct_block_size": None,
+            "adaptive_lookahead": None,
+            "audit_budget": 2,
+            "audit_threshold": 0.02,
+            "audit_min_samples": 32,
         }
         for name, value in defaults.items():
             if not hasattr(model, name):
@@ -308,6 +326,14 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             )
 
     def _validate_parameters(self):
+        if self.adaptive_lookahead not in (None, "gap", "impurity", "samples", "random", "fixed"):
+            raise ValueError("Unknown adaptive_lookahead heuristic")
+        if self.adaptive_lookahead is not None and self.solver.lower() != "direct":
+            raise ValueError("Experimental adaptive lookahead requires solver=direct")
+        self._validate_minimum_integer("audit_budget", self.audit_budget, 0)
+        self._validate_minimum_integer("audit_min_samples", self.audit_min_samples, 1)
+        if not isinstance(self.audit_threshold, Real) or not np.isfinite(self.audit_threshold) or self.audit_threshold < 0:
+            raise ValueError("audit_threshold must be finite and nonnegative")
         if self.acceptance_policy not in ("accuracy", "objective"):
             raise ValueError("acceptance_policy must be accuracy or objective")
         if (

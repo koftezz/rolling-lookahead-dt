@@ -380,3 +380,41 @@ no optimality certificate and no invented gap. Before the first feasible root,
 there may be no incumbent. Candidate-order tie-breaking matches unblocked direct.
 Run `python benchmarks/bench_direct.py` for fresh-process RSS and timing data;
 RSS includes interpreter, dependencies, and inputs, not just pair costs.
+
+### Experimental adaptive lookahead and offline diagnostics
+
+`adaptive_lookahead=None` is the unchanged default. With `solver="direct"`, opt
+into `"gap"`, `"impurity"`, `"samples"`, `"random"`, or `"fixed"`. The initial
+OCT-2 and each rolling replacement retain a feasible baseline. An eligible node
+with at least three remaining levels may receive one exact depth-3 audit;
+independent routed scoring must agree with its reported objective, and the
+configured acceptance policy must accept it against the baseline. Subsequent
+replacement/level acceptance still applies. Failed or unusable audits retain
+the baseline. This does not revise ancestors that were already committed.
+
+`audit_budget=2` limits the number of audits across the fit, including the root.
+`audit_min_samples=32` is a sample floor; samples selection audits every node
+above this floor. Fixed selection uses the same floor and audits every eligible
+node until the budget is used. Gap selection requires the best two root costs
+to differ by at most `audit_threshold=0.02`. Impurity selection requires residual
+objective at least that threshold. Counts are divided by subset size for these
+heuristics. Random selection uses a seeded 50% decision per eligible node and
+may spend less than its count allowance. Nodes are visited deterministically,
+not globally ranked. `audit_count_` and `audit_time_` expose actual expenditure.
+Budgets are allowances, not a promise that different selectors spend equal time.
+There is no learned allocator. Controlled-perturbation signals are offline only.
+
+`rollotree.diagnostics.commitment_regret(...)` performs expensive shallow,
+fixed-root depth-3 and free-root depth-3 solves with identical candidates,
+support rules and objective units. `ExactDepth3Solver.solve(fixed_root=...)`
+restricts only the top root, retaining all child candidates. Exact regret is
+reported only when all required solves are optimal; otherwise it is `None`.
+It measures the cost of keeping the shallow root at depth 3, not final rolling
+tree quality. A small root gap is not a regret certificate and requires empirical
+evaluation. See the reproducible experiments for failures of this hypothesis.
+
+Related work predates this extension: [anytime lookahead induction](https://csaws.cs.technion.ac.il/~shaulm/papers/abstracts/Esmeir-2004-LBA.html),
+[variable-depth lookahead](https://www.bgu.ac.il/en/researcher/mark-last/publications/39521646/),
+and [MurTree](https://jmlr.org/papers/v23/20-520.html). We make no novelty claim.
+This is a bounded experimental implementation, not evidence of improved
+held-out accuracy or an established quality–compute advantage.

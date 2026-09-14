@@ -98,6 +98,10 @@ class RollingOptimizer:
         initial_depth: int = 2,
         acceptance_policy: str = "accuracy",
         trace: bool = False,
+        adaptive_lookahead=None,
+        audit_budget=2,
+        audit_threshold=0.02,
+        audit_min_samples=32,
     ):
         self.solver_config = solver_config
         self.criterion = criterion
@@ -108,6 +112,12 @@ class RollingOptimizer:
         self.initial_depth = initial_depth
         self.acceptance_policy = acceptance_policy
         self.trace = trace
+        self.adaptive_lookahead = adaptive_lookahead
+        self.audit_budget = audit_budget
+        self.audit_threshold = audit_threshold
+        self.audit_min_samples = audit_min_samples
+        self.audit_count_ = 0
+        self.audit_time_ = 0.0
         self.search_trace_ = []
 
         self.fit_status_ = "completed"
@@ -213,6 +223,9 @@ class RollingOptimizer:
         tree.set_branch_feature(3, solution.right_feature)
         for leaf_id, class_label in solution.leaf_classes.items():
             tree.set_leaf_class(leaf_id, class_label)
+        from rollotree.rolling.adaptive import maybe_audit
+        tree = maybe_audit(self, tree, solution, train_data, candidate_features,
+                           1, self._target_depth, y_idx)
         return tree, solution.status
 
     def _build_initial_tree(self, train_data, features, classes, y_idx):
@@ -292,6 +305,9 @@ class RollingOptimizer:
     ) -> Tuple[DecisionTree, Dict[int, DepthResult]]:
         """Build a tree and return accepted per-depth results."""
         self.fit_status_ = "completed"
+        self._target_depth = target_depth
+        self.audit_count_ = 0
+        self.audit_time_ = 0.0
         self.subproblem_diagnostics_ = []
         self.search_trace_ = []
         self._started_at = time.perf_counter()
@@ -321,8 +337,8 @@ class RollingOptimizer:
             tree, X_train, y_train, X_test, y_test
         )
         results = {
-            self.initial_depth: DepthResult(
-                depth=self.initial_depth,
+            tree.get_depth(): DepthResult(
+                depth=tree.get_depth(),
                 training_accuracy=train_accuracy,
                 test_accuracy=test_accuracy,
                 elapsed_time=time.perf_counter() - initial_started,
@@ -351,6 +367,10 @@ class RollingOptimizer:
                 results,
             )
 
+        remaining = self._remaining_time()
+        if remaining is not None and remaining <= 0 and self.fit_status_ != "time_limit":
+            self.fit_status_ = "time_limit"
+            self._warn_timeout()
         self._record(event="stop", stopping_reason=self.fit_status_, depth=tree.get_depth())
         self.actual_depth_ = tree.get_depth()
         self.fit_time_ = time.perf_counter() - self._started_at
@@ -370,7 +390,7 @@ class RollingOptimizer:
         results,
     ):
         blocked_leaves: set[int] = set()
-        previous_accuracy = results[self.initial_depth].training_accuracy
+        previous_accuracy = next(iter(results.values())).training_accuracy
 
         while True:
             routed_leaf_ids = tree.apply(X_train)
@@ -470,9 +490,14 @@ class RollingOptimizer:
                 else:
                     status = solution.status.value
                     skip_reason = None
-                    tree.extend_at_leaf(
-                        result.parent_node, solution, base_depth=2
-                    )
+                    if self.adaptive_lookahead is not None:
+                        from rollotree.rolling.adaptive import maybe_audit, solution_tree, replace_region
+                        baseline = solution_tree(solution, features)
+                        local = maybe_audit(self, baseline, solution, inp.parent_data, inp.features,
+                                            result.parent_node, target_depth-(depth-2), y_idx)
+                        replace_region(tree, local, result.parent_node)
+                    else:
+                        tree.extend_at_leaf(result.parent_node, solution, base_depth=2)
                     tree.depth = max(tree.depth, depth)
                     new_obj = (score_tree(tree, sub_X, sub_y, self.criterion)
                                if self.trace or self.acceptance_policy == "objective" else None)
