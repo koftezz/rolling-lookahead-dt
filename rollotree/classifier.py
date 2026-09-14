@@ -82,6 +82,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         random_state: int = None,
         total_time_limit: float = None,
         initial_depth: int = 2,
+        acceptance_policy: str = "accuracy",
+        trace: bool = False,
     ):
         self.depth = depth
         self.criterion = criterion
@@ -97,6 +99,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         self.random_state = random_state
         self.total_time_limit = total_time_limit
         self.initial_depth = initial_depth
+        self.acceptance_policy = acceptance_policy
+        self.trace = trace
         self._is_fitted = False
 
     @property
@@ -159,6 +163,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             random_state=self.random_state,
             total_time_limit=self.total_time_limit,
             initial_depth=int(self.initial_depth),
+            acceptance_policy=self.acceptance_policy,
+            trace=self.trace,
         )
         self.tree_, self.depth_results_ = optimizer.build_tree(
             train_data=train_df,
@@ -167,6 +173,7 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             classes=self.classes_.tolist(),
             target_depth=int(self.depth),
         )
+        self.search_trace_ = optimizer.search_trace_
         self.fit_status_ = optimizer.fit_status_
         self.fit_time_ = optimizer.fit_time_
         self.actual_depth_ = optimizer.actual_depth_
@@ -231,6 +238,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             "random_state": None,
             "total_time_limit": None,
             "initial_depth": 2,
+            "acceptance_policy": "accuracy",
+            "trace": False,
         }
         for name, value in defaults.items():
             if not hasattr(model, name):
@@ -295,6 +304,8 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             )
 
     def _validate_parameters(self):
+        if self.acceptance_policy not in ("accuracy", "objective"):
+            raise ValueError("acceptance_policy must be accuracy or objective")
         if (
             not isinstance(self.depth, Integral)
             or isinstance(self.depth, bool)

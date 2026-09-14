@@ -96,6 +96,8 @@ class RollingOptimizer:
         random_state: Optional[int] = None,
         total_time_limit: Optional[float] = None,
         initial_depth: int = 2,
+        acceptance_policy: str = "accuracy",
+        trace: bool = False,
     ):
         self.solver_config = solver_config
         self.criterion = criterion
@@ -104,6 +106,9 @@ class RollingOptimizer:
         self.random_state = random_state
         self.total_time_limit = total_time_limit
         self.initial_depth = initial_depth
+        self.acceptance_policy = acceptance_policy
+        self.trace = trace
+        self.search_trace_ = []
 
         self.fit_status_ = "completed"
         self.fit_time_ = 0.0
@@ -112,6 +117,11 @@ class RollingOptimizer:
         self._started_at = 0.0
         self._deadline = None
         self._base_seed = None
+
+    def _record(self, **event):
+        if self.trace:
+            self.search_trace_.append(dict(backend=self.solver_config.solver_name,
+                remaining_budget=self._remaining_time(), **event))
 
     def _remaining_time(self) -> Optional[float]:
         if self._deadline is None:
@@ -169,6 +179,10 @@ class RollingOptimizer:
             y_idx=y_idx,
         )
         elapsed = time.perf_counter() - started
+        self._record(event="initial_solve", node=1, depth=0, n_samples=len(train_data),
+                     n_features=len(candidate_features), status=solution.status.value,
+                     coefficient_time=solution.coefficient_time, assembly_time=solution.assembly_time,
+                     solve_time=solution.runtime, proposed_objective=solution.objective_value)
         self.subproblem_diagnostics_.append(
             SubproblemDiagnostic(
                 depth=2,
@@ -277,6 +291,7 @@ class RollingOptimizer:
         """Build a tree and return accepted per-depth results."""
         self.fit_status_ = "completed"
         self.subproblem_diagnostics_ = []
+        self.search_trace_ = []
         self._started_at = time.perf_counter()
         # Deadline values cross process boundaries. Python 3.9 on macOS does
         # not guarantee a common ``perf_counter`` reference point between
@@ -312,6 +327,11 @@ class RollingOptimizer:
             )
         }
 
+        from rollotree.tree.scoring import score_tree
+        self._record(event="initial", node=1, depth=0, n_samples=len(train_data),
+                     accepted=True, proposed_objective=(score_tree(tree, X_train, y_train, self.criterion) if self.trace else None),
+                     proposed_accuracy=train_accuracy, status=initial_status.value)
+
         if initial_status == SolverStatus.TIME_LIMIT:
             self.fit_status_ = "time_limit"
             self._warn_timeout()
@@ -329,6 +349,7 @@ class RollingOptimizer:
                 results,
             )
 
+        self._record(event="stop", stopping_reason=self.fit_status_, depth=tree.get_depth())
         self.actual_depth_ = tree.get_depth()
         self.fit_time_ = time.perf_counter() - self._started_at
         return tree, results
@@ -410,6 +431,7 @@ class RollingOptimizer:
             level_started = time.perf_counter()
             results_list = self._solve_inputs(inputs)
             snapshot = copy.deepcopy(tree)
+            trace_start = len(self.search_trace_)
             merged = 0
             saw_timeout = False
 
@@ -418,6 +440,15 @@ class RollingOptimizer:
                 inp = input_by_parent[result.parent_node]
                 depth = result.parent_node.bit_length() - 1 + 2
                 solution = result.sub_solution
+                before = copy.deepcopy(tree)
+                from rollotree.tree.scoring import score_tree
+                sub_X = np.asarray(inp.parent_data[features])
+                sub_y = np.asarray(inp.parent_data.iloc[:, y_idx])
+                old_obj = (score_tree(tree, sub_X, sub_y, self.criterion)
+                           if self.trace or self.acceptance_policy == "objective" else None)
+                old_acc = float(np.mean(tree.predict(sub_X) == sub_y))
+                accepted = False
+                new_obj, new_acc = None, None
                 if result.timed_out:
                     status = SolverStatus.TIME_LIMIT.value
                     skip_reason = "total_time_limit"
@@ -440,9 +471,27 @@ class RollingOptimizer:
                     tree.extend_at_leaf(
                         result.parent_node, solution, base_depth=2
                     )
-                    merged += 1
+                    tree.depth = max(tree.depth, depth)
+                    new_obj = (score_tree(tree, sub_X, sub_y, self.criterion)
+                               if self.trace or self.acceptance_policy == "objective" else None)
+                    new_acc = float(np.mean(tree.predict(sub_X) == sub_y))
+                    if self.acceptance_policy == "objective" and new_obj > old_obj + 1e-10:
+                        tree = before
+                        skip_reason = "objective_regression"
+                        blocked_leaves.update(result.leaf_ids)
+                    else:
+                        merged += 1
+                        accepted = True
                     saw_timeout |= solution.status == SolverStatus.TIME_LIMIT
 
+                self._record(event="update", node=result.parent_node, depth=depth-2,
+                    n_samples=result.n_samples, n_features=len(inp.features), status=status,
+                    existing_objective=old_obj, proposed_objective=new_obj,
+                    existing_accuracy=old_acc, proposed_accuracy=new_acc,
+                    coefficient_time=getattr(solution, "coefficient_time", None),
+                    assembly_time=getattr(solution, "assembly_time", None),
+                    solve_time=getattr(solution, "runtime", None), accepted=accepted,
+                    reason=skip_reason or "accepted")
                 self.subproblem_diagnostics_.append(
                     SubproblemDiagnostic(
                         depth=depth,
@@ -486,7 +535,10 @@ class RollingOptimizer:
             train_accuracy, test_accuracy = self._evaluate(
                 tree, X_train, y_train, X_test, y_test
             )
-            if train_accuracy + 1e-10 < previous_accuracy:
+            if self.acceptance_policy == "accuracy" and train_accuracy + 1e-10 < previous_accuracy:
+                for event in self.search_trace_[trace_start:]:
+                    if event.get("accepted"):
+                        event.update(accepted=False, reason="level_accuracy_regression")
                 tree = snapshot
                 self.fit_status_ = "early_stopped"
                 self.subproblem_diagnostics_.append(

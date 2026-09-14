@@ -336,3 +336,31 @@ Misclassification objectives are counts, not rates. Gini is weighted by leaf
 sample fraction; combining subset objectives requires subset-size weighting.
 The corresponding LP has integral vertices, but tied optimal vertices can have
 fractional convex combinations that are also optimal points.
+
+### Acceptance and search traces
+
+`acceptance_policy="accuracy"` retains the existing level-wide accuracy guard:
+all replacements in a level are reverted if full training accuracy falls by
+more than 1e-10. Individual replacements may trade accuracy within that level.
+`acceptance_policy="objective"` independently scores each affected subset before
+and after replacement and rejects objective increases above 1e-10. Scores use
+raw routed labels, not solver coefficients. Gini trace scores are normalized
+within that subset; multiply by `n_samples / training_n` before adding across
+subsets. Misclassification trace scores are counts and add directly. Neither
+policy promises held-out improvement.
+
+Set `trace=True` for JSON-serializable `search_trace_` events: initial solves,
+initial acceptance, attempted updates, and final stopping status. No raw rows
+are recorded. Update records include node/depth, subset/candidate sizes, backend,
+status, before/after objective and accuracy, timings, decision/reason, and budget
+remaining. A level rollback marks its attempted replacements rejected.
+Existing `subproblem_diagnostics_` remains available independently.
+
+`time_limit` applies per external solver call. `total_time_limit` is a cooperative
+fit budget checked at solve/expansion boundaries; coefficient calculation,
+model construction and dispatched calls can overrun it. This is not a hard
+wall-clock deadline. An incumbent is retained on exhaustion; initialization
+without an incumbent raises. Coefficient timing covers coefficients (and direct
+support filtering); assembly covers external support filtering/model setup;
+solve timing covers the backend call or direct cost scan. Missing timings are
+`None`, not zero. Direct assembly is zero because no external model is built.
