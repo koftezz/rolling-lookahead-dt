@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import multiprocessing
 import os
 import platform
 import resource
@@ -107,6 +108,15 @@ def worker(name, seed, method, budget):
     return row
 
 
+def isolated_worker(connection, name, seed, method, budget):
+    try:
+        connection.send(worker(name, seed, method, budget))
+    except Exception as exc:
+        connection.send(dict(dataset=name, seed=seed, method=method, budget=budget, status="failed", error=repr(exc)))
+    finally:
+        connection.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", nargs=4)
@@ -126,12 +136,27 @@ def main():
                 # Seeded backend order; each fit gets a fresh process and identical split.
                 np.random.default_rng(seed).shuffle(methods)
                 for method in methods:
-                    output = subprocess.check_output([sys.executable, __file__, "--worker", name, str(seed), method, str(budget)], text=True, env=env)
-                    results.append(json.loads(output))
+                    if "fork" in multiprocessing.get_all_start_methods():
+                        context = multiprocessing.get_context("fork")
+                        receive, send = context.Pipe(duplex=False)
+                        process = context.Process(target=isolated_worker, args=(send, name, seed, method, budget))
+                        with threadpool_limits(limits=1):
+                            process.start()
+                            send.close()
+                            if not receive.poll(60):
+                                process.terminate()
+                                process.join()
+                                raise RuntimeError("Experiment worker failed to return within 60 seconds")
+                            results.append(receive.recv())
+                            process.join()
+                        receive.close()
+                    else:
+                        output = subprocess.check_output([sys.executable, __file__, "--worker", name, str(seed), method, str(budget)], text=True, env=env)
+                        results.append(json.loads(output))
                 print(f"Finished {name} seed={seed} budget={budget}", flush=True)
     payload = dict(schema_version=1, revision=revision, platform=platform.platform(), processor=platform.processor(),
                    python=sys.version, packages={p: importlib.metadata.version(p) for p in ["numpy","pandas","pulp","highspy","scikit-learn"]},
-                   threads=1, warmup="none; fresh process per fit", criterion="weighted_gini",
+                   threads=1, warmup="no fit warmup; fresh sequential fork per fit with imports preloaded (subprocess fallback without fork)", criterion="weighted_gini",
                    timing="fit includes coefficients, assembly and audits; preprocessing separately recorded; imports excluded",
                    budget_note="equal cooperative upper bounds, not equal actual expenditure; CART has no enforced fit budget; exact3 has a smaller maximum depth",
                    results=results)
