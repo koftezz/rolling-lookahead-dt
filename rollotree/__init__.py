@@ -6,7 +6,7 @@ algorithm using PuLP for solver-agnostic optimization (HiGHS or Gurobi).
 
 from rollotree._version import __version__
 
-from rollotree.rolling.policy import AuditState, AuditDecision, JevAuditSelector
+from rollotree.rolling.policy import AuditState, AuditDecision, AuditPlan, AuditExample, JevAuditSelector, JevSearchController
 from rollotree.classifier import RollingOCT
 from rollotree.solver.base import SolverConfig, SolverStatus
 from rollotree.solver.depth3 import (
@@ -23,7 +23,10 @@ __all__ = [
     "RollingOCT",
     "AuditState",
     "AuditDecision",
+    "AuditPlan",
+    "AuditExample",
     "JevAuditSelector",
+    "JevSearchController",
     "SolverConfig",
     "SolverStatus",
     "ExactDepth3Solver",

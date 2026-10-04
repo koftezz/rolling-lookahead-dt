@@ -12,18 +12,42 @@ from rollotree.tree.impurity import MisclassificationCriterion
 from rollotree.rolling.policy import AuditState, AuditDecision
 
 
-def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
-                   residual, accuracy, gap, *, baseline=None, X=None, started=None):
-    """Bound policy work and recheck time before allowing an audit."""
-    selection_started = time.perf_counter()
-    started = selection_started if started is None else started
-    remaining = optimizer._remaining_time()
-    allowance = (optimizer.policy_time_limit - optimizer.policy_time_
-                 - (selection_started - started))
-    if (allowance <= 0 or (remaining is not None and remaining <= 0)
-            or optimizer.policy_call_count_ >= optimizer.policy_max_calls):
-        optimizer.policy_time_ += time.perf_counter() - started
-        return False, "fit_budget" if remaining is not None and remaining <= 0 else "policy_budget"
+def _leaf_evidence(baseline, X, y, candidates, min_support):
+    """Training-only per-leaf support, composition and best one-split gain."""
+    routed = baseline.apply(X)
+    positions = [baseline.features.index(feature) for feature in candidates]
+    records = []
+    for leaf in np.unique(routed):
+        mask = routed == leaf
+        leaf_y = y[mask]
+        leaf_X = X[mask][:, positions]
+        _, encoded = np.unique(leaf_y, return_inverse=True)
+        counts = np.bincount(encoded).astype(float)
+        proportions = counts / len(leaf_y)
+        impurity = float(1 - np.sum(proportions ** 2))
+        ones = np.asarray(leaf_X, dtype=float).sum(axis=0)
+        zeros = len(leaf_y) - ones
+        feasible = (ones >= min_support) & (zeros >= min_support)
+        # Weighted post-split Gini, with empty child contributions equal to zero.
+        post = np.ones(len(positions), dtype=float)
+        for label in range(len(counts)):
+            class_ones = np.asarray(leaf_X[encoded == label], dtype=float).sum(axis=0)
+            class_zeros = counts[label] - class_ones
+            post -= (np.divide(class_ones ** 2, ones, out=np.zeros_like(ones), where=ones > 0)
+                     + np.divide(class_zeros ** 2, zeros, out=np.zeros_like(zeros), where=zeros > 0)) / len(leaf_y)
+        records.append({
+            "support_fraction": float(len(leaf_y) / len(y)),
+            "class_proportions": sorted(proportions.tolist(), reverse=True),
+            "gini": impurity,
+            "best_one_split_gini_gain": (max(0.0, float(impurity - post[feasible].min()))
+                                          if np.any(feasible) else 0.0),
+        })
+    return tuple(sorted(records, key=lambda row: (-row["support_fraction"], -row["gini"])))
+
+
+def _audit_state(optimizer, shallow, y, candidates, node, remaining_depth,
+                 residual, accuracy, gap, *, baseline, X, allowance,
+                 current_region_residual=None):
     complete = shallow.status == SolverStatus.OPTIMAL
     _, counts = np.unique(y, return_counts=True)
     scale = len(y) if isinstance(optimizer.criterion, MisclassificationCriterion) else 1
@@ -32,7 +56,8 @@ def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
     if baseline is not None:
         _, supports = np.unique(baseline.apply(X), return_counts=True)
     shallow_times = (shallow.coefficient_time, shallow.assembly_time, shallow.runtime)
-    state = AuditState(
+    enriched = callable(getattr(optimizer.audit_selector, "plan", None))
+    return AuditState(
         node=int(node), depth=node.bit_length()-1, remaining_depth=int(remaining_depth),
         n_samples=len(y), n_features=len(candidates),
         class_proportions=tuple(sorted((counts / len(y)).tolist(), reverse=True)),
@@ -41,7 +66,7 @@ def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
         root_gap=float(gap) if gap is not None and complete else None,
         root_costs_complete=complete,
         n_feasible_roots_observed=len(shallow.root_costs),
-        remaining_seconds=remaining,
+        remaining_seconds=optimizer._remaining_time(),
         remaining_audits=int(optimizer.audit_budget-optimizer.audit_count_),
         shallow_status=shallow.status.value,
         shallow_seconds=(sum(t for t in shallow_times if t is not None)
@@ -56,8 +81,33 @@ def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
         near_min_support=(bool(supports.min() <= 2 * optimizer.solver_config.min_samples_leaf)
                           if supports is not None else None),
         remaining_policy_seconds=allowance,
+        schema_version="3" if enriched else "2",
+        training_fraction=(len(y) / getattr(optimizer, "_training_samples", len(y)) if enriched else None),
+        current_region_residual=current_region_residual if enriched else None,
+        leaf_evidence=(_leaf_evidence(baseline, X, y, candidates, optimizer.solver_config.min_samples_leaf)
+                       if enriched and baseline is not None else None),
     )
-    state_hash = state.fingerprint()
+
+
+def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
+                   residual, accuracy, gap, *, baseline=None, X=None, started=None):
+    """Bound policy work and recheck time before allowing an audit."""
+    selection_started = time.perf_counter()
+    started = selection_started if started is None else started
+    pending = getattr(optimizer, "_planned_audits", {}).pop(node, None)
+    if pending is not None:
+        state, decision, plan_call = pending
+        return _finish_policy_decision(optimizer, state, decision, started, plan_call=plan_call)
+    remaining = optimizer._remaining_time()
+    allowance = (optimizer.policy_time_limit - optimizer.policy_time_
+                 - (selection_started - started))
+    if (allowance <= 0 or (remaining is not None and remaining <= 0)
+            or optimizer.policy_call_count_ >= optimizer.policy_max_calls):
+        optimizer.policy_time_ += time.perf_counter() - started
+        return False, "fit_budget" if remaining is not None and remaining <= 0 else "policy_budget"
+    state = _audit_state(optimizer, shallow, y, candidates, node, remaining_depth,
+                         residual, accuracy, gap, baseline=baseline, X=X, allowance=allowance)
+    state.fingerprint()  # Reject nonfinite state before any request.
     # State extraction is part of the policy's allowance too.
     allowance -= time.perf_counter() - selection_started
     remaining = optimizer._remaining_time()
@@ -92,6 +142,12 @@ def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
                 RuntimeWarning, stacklevel=3,
             )
             optimizer._policy_warned = True
+    return _finish_policy_decision(optimizer, state, decision, started)
+
+
+def _finish_policy_decision(optimizer, state, decision, started, plan_call=None):
+    state_hash = state.fingerprint()
+    metadata = asdict(decision)
     elapsed = time.perf_counter() - started
     optimizer.policy_time_ += elapsed
     optimizer.policy_input_tokens_ += decision.input_tokens or 0
@@ -110,10 +166,11 @@ def _select_policy(optimizer, shallow, y, candidates, node, remaining_depth,
     if fallback_reason is not None:
         optimizer.policy_fallback_count_ += 1
     optimizer._record(
-        event="policy", node=node, depth=node.bit_length()-1,
+        event="policy", node=state.node, depth=state.depth,
         state_hash=state_hash, state_schema_version=state.schema_version,
+        plan_call=plan_call,
         policy_seconds=elapsed, selected=selected, effective_action="audit" if selected else "skip",
-        **{**asdict(decision), "reason": reason, "fallback_reason": fallback_reason},
+        **{**metadata, "reason": reason, "fallback_reason": fallback_reason},
     )
     return selected, reason if reason != "policy" else "policy_" + decision.action
 
@@ -157,6 +214,16 @@ def _record_skipped_audit(optimizer, node, reason):
                       final_commit=False, final_commit_reason=reason)
 
 
+def _usable_shallow(shallow):
+    return (shallow.status in (SolverStatus.OPTIMAL, SolverStatus.TIME_LIMIT)
+            and all(feature is not None for feature in (
+                shallow.root_feature, shallow.left_feature, shallow.right_feature))
+            and isinstance(shallow.leaf_classes, dict)
+            and all(shallow.leaf_classes.get(leaf) is not None for leaf in (4, 5, 6, 7))
+            and isinstance(shallow.objective_value, Real)
+            and np.isfinite(shallow.objective_value))
+
+
 def maybe_audit(optimizer, baseline, shallow, data, candidates, node, remaining_depth, y_idx):
     """Keep baseline through unsuccessful audits and rescore any deeper candidate."""
     mode = optimizer.adaptive_lookahead
@@ -172,20 +239,15 @@ def maybe_audit(optimizer, baseline, shallow, data, candidates, node, remaining_
             reason = "sample_floor"
         elif optimizer._config_for_solve() is None:
             reason = "fit_budget"
-        elif (optimizer.policy_call_count_ >= optimizer.policy_max_calls
-              or optimizer.policy_time_ >= optimizer.policy_time_limit):
+        elif (node not in getattr(optimizer, "_planned_audits", {}) and
+              (optimizer.policy_call_count_ >= optimizer.policy_max_calls
+              or optimizer.policy_time_ >= optimizer.policy_time_limit)):
             reason = "policy_budget"
         if reason is not None:
             _record_skipped_audit(optimizer, node, reason)
             return baseline
     policy_started = time.perf_counter() if mode == "policy" else None
-    if (shallow.status not in (SolverStatus.OPTIMAL, SolverStatus.TIME_LIMIT)
-            or any(feature is None for feature in (
-                shallow.root_feature, shallow.left_feature, shallow.right_feature))
-            or not isinstance(shallow.leaf_classes, dict)
-            or any(shallow.leaf_classes.get(leaf) is None for leaf in (4, 5, 6, 7))
-            or not isinstance(shallow.objective_value, Real)
-            or not np.isfinite(shallow.objective_value)):
+    if not _usable_shallow(shallow):
         if policy_started is not None:
             optimizer.policy_time_ += time.perf_counter() - policy_started
         _record_skipped_audit(optimizer, node, "unusable_baseline")
@@ -279,6 +341,7 @@ def maybe_audit(optimizer, baseline, shallow, data, candidates, node, remaining_
         agrees = abs(new_obj-solution.objective_value) <= 1e-10 * max(1, abs(new_obj))
         adopt = agrees and (new_obj <= old_obj+1e-10 if optimizer.acceptance_policy == "objective" else new_acc+1e-10 >= old_acc)
         event.update(proposed_objective=new_obj, proposed_accuracy=new_acc,
+                     normalized_proposed_objective=float(new_obj / scale),
                      deeper_root=solution.branch_features[1], adopted_as_candidate=bool(adopt),
                      outcome=("accepted" if adopt else "objective_mismatch" if not agrees
                               else "acceptance_policy_rejected"))

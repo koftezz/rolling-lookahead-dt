@@ -476,6 +476,68 @@ No raw rows, feature names, or class names are sent. A time-limited shallow
 search reports incomplete root statistics and omits its gap. State snapshots
 and raw provider errors are not embedded in traces.
 
+For experimental allocation across competing nodes, use `JevSearchController`:
+
+```python
+from rollotree import JevSearchController, RollingOCT
+
+model = RollingOCT(
+    depth=5, solver="direct", adaptive_lookahead="policy",
+    audit_selector=JevSearchController(
+        timeout=2.0,
+        min_confidence=0.0,  # diagnostic default; calibrate on development data
+        # audit_seconds_estimate=1.0,  # optional: supply a measured estimate
+        # reference_cases=frozen_examples,  # optional: up to 16 AuditExample records
+        min_objective_gain=0.01,  # whole-tree normalized training-objective target
+        max_frontier_nodes=16,
+    ),
+    audit_budget=2, policy_max_calls=3, policy_time_limit=6.0,
+    total_time_limit=20.0, acceptance_policy="objective", trace=True,
+).fit(X_train, y_train)
+```
+
+After the initial root decision, the controller compares eligible disjoint
+regions at each rolling level in one request. Each node receives separate
+typed questions for audit benefit and relative priority. Python visits proposed
+audits in descending ordinal priority, breaks ties by training-weighted residual
+loss, and enforces the remaining audit/time budgets before every solve. This
+can allocate a scarce audit to a later node instead of spending it in node-ID
+order. Nodes outside the configured request cap are skipped; the cap retains
+nodes with the largest training-weighted residual. Skipped nodes still receive
+the ordinary shallow rolling update.
+
+Controller state schema 3 adds the node's fraction of training rows, current
+committed-region loss, and aggregate per-leaf support, class proportions, Gini,
+and best feasible one-split Gini gain. It also receives up to 16 earlier audit
+observations with measured duration, independently scored local objective and
+current commitment status. History exists even with tracing disabled and resets
+on every fit. These observations do not establish causal final-tree gains, and
+one-split evidence cannot identify every higher-order interaction. Test labels,
+raw rows and feature/class names are not included.
+
+The controller has no calibrated confidence threshold by default; explicit
+abstention still skips. Priorities are ordinal judgments, not predicted gains.
+The optional duration estimate must come from separate measurements; otherwise
+only observed past durations are supplied. Enabling broader control does not
+establish an advantage over local rules given the same evidence.
+
+`AuditExample(state, final_objective_gain, audit_seconds)` supplies offline
+evidence from paired full continuations with and without one audit. Freeze
+these examples before evaluating new cases; use training-objective differences,
+not test labels or local incumbent regret. Examples, a gain floor and
+code-computed evidence buckets are sent explicitly as development context.
+They are optional and remain configuration on the saved controller, so include
+only aggregate evidence intended for reuse and provider submission.
+
+Custom controllers implement the ordinary `select(state, *, timeout)` root
+interface and `plan(states, *, history, timeout) -> AuditPlan` for frontiers.
+An `AuditPlan` maps every supplied node ID to an `AuditDecision`, whose optional
+`priority` is in `[0, 1]`. It owns the batch's `input_tokens`; individual plan
+decisions must not duplicate usage. Invalid plans fail closed for the whole
+frontier. A batch consumes one policy call, with its charged time and token
+usage in a `policy_plan` trace event; per-node policy events reference that
+call. Several per-node fallbacks can therefore follow one failed plan call.
+
 The selector is called after ordinary eligibility checks. At most
 `policy_max_calls` attempts are made per fit; the default is 8, with a default
 `policy_time_limit` of 1 second. Both counters reset on refit. Request timeouts

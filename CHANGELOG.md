@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fit-wide policy call/time allowances, safe skip fallback, usage counters, and requested/returned model provenance. Default fits and predictions remain network-free.
 - Explicit audit commitment traces for later region rejection, level rollback, and superseded replacements.
 - Opt-in live connectivity example and SDK integration tests using a local HTTP transport.
+- Experimental `JevSearchController` and generic batched `AuditPlan` interface for prioritizing competing frontier nodes within existing audit/time budgets.
+- Controller-only aggregate leaf evidence, committed-region loss, training weight, and per-fit audit observations with commitment status; batched usage/provenance traces.
 
 ### Fixed
 - Honor cooperative deadlines and per-solve time limits in dense and blocked direct solves; propagate configured deadlines to exact depth-3 search.
