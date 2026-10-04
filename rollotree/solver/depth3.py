@@ -374,10 +374,12 @@ class ExactDepth3Solver:
             )
         # HiGHS and Gurobi both have nonzero backend defaults. Request a zero
         # gap explicitly so OPTIMAL supports the public exactness guarantee.
-        self.config = config.copy_with(mip_gap=0.0)
+        deadlines = [value for value in (config.deadline, deadline)
+                     if value is not None]
+        self.deadline = min(deadlines) if deadlines else None
+        self.config = config.copy_with(mip_gap=0.0, deadline=self.deadline)
         self.criterion = criterion
         self.n_jobs = n_jobs
-        self.deadline = deadline
 
     def solve(
         self,
@@ -413,6 +415,14 @@ class ExactDepth3Solver:
         if fixed_root is not None and fixed_root not in selected:
             raise ValueError("fixed_root must belong to the candidate feature set")
         roots = selected if fixed_root is None else (fixed_root,)
+        if self.deadline is not None and time.time() >= self.deadline:
+            return OCT3Solution(
+                status=SolverStatus.TIME_LIMIT,
+                runtime=time.perf_counter() - started,
+                features=selected,
+                n_candidates=len(roots),
+                n_complete_candidates=0,
+            )
         inputs = [
             _CandidateInput(
                 root_feature=root_feature,

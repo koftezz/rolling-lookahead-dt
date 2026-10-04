@@ -426,3 +426,166 @@ runtime/RSS, exact commitment diagnostics, paired train/test experiments,
 negative results, and reproduction commands. The study establishes no general
 adaptive-selector advantage. Tracing overhead counts toward cooperative fit
 budgets, so results near a binding deadline can vary with system load.
+
+### Experimental Jev audit selection
+
+Jev can optionally advise whether an eligible node should receive a depth-3
+audit. The numerical solver still builds the candidate and the existing
+acceptance policy checks it. This is an experimental routing policy, not an
+optimality certificate or evidence of improved accuracy/runtime. Small local
+fits can be much faster than an API request.
+
+Install from a checkout containing this feature (Python **3.10+** for the
+optional TypeSafe SDK; base RolloTree continues to support Python 3.9):
+
+```bash
+python -m pip install -e ".[jev]"
+export TYPESAFE_API_KEY="your-key"
+```
+
+```python
+from rollotree import RollingOCT, JevAuditSelector
+
+model = RollingOCT(
+    depth=4,
+    solver="direct",
+    adaptive_lookahead="policy",
+    audit_selector=JevAuditSelector(
+        model="jev-1.13.0",
+        timeout=0.5,          # HTTP operation timeout in seconds
+        min_confidence=0.8,  # experimental threshold; calibrate on your data
+        fallback="skip",
+    ),
+    audit_budget=2,
+    policy_max_calls=4,
+    policy_time_limit=2.0,    # total cooperative policy allowance per fit
+    total_time_limit=30.0,    # includes policy work and API waiting
+    acceptance_policy="objective",
+    trace=True,
+)
+model.fit(X_train, y_train)
+print(model.policy_call_count_, model.policy_time_, model.audit_count_)
+print([e for e in model.search_trace_ if e["event"] == "policy"])
+predictions = model.predict(X_test)  # no API call or key required
+```
+
+Only aggregate node statistics are sent: sizes, sorted class proportions,
+normalized loss/accuracy, complete root gap/ties/spread when available,
+shallow status/runtime, leaf support balance, depth, and remaining budgets.
+No raw rows, feature names, or class names are sent. A time-limited shallow
+search reports incomplete root statistics and omits its gap. State snapshots
+and raw provider errors are not embedded in traces.
+
+For experimental allocation across competing nodes, use `JevSearchController`:
+
+```python
+from rollotree import JevSearchController, RollingOCT
+
+model = RollingOCT(
+    depth=5, solver="direct", adaptive_lookahead="policy",
+    audit_selector=JevSearchController(
+        timeout=2.0,
+        min_confidence=0.0,  # diagnostic default; calibrate on development data
+        # audit_seconds_estimate=1.0,  # optional: supply a measured estimate
+        # reference_cases=frozen_examples,  # optional: up to 16 AuditExample records
+        min_objective_gain=0.01,  # whole-tree normalized training-objective target
+        max_frontier_nodes=16,
+    ),
+    audit_budget=2, policy_max_calls=3, policy_time_limit=6.0,
+    total_time_limit=20.0, acceptance_policy="objective", trace=True,
+).fit(X_train, y_train)
+```
+
+After the initial root decision, the controller compares eligible disjoint
+regions at each rolling level in one request. Each node receives separate
+typed questions for audit benefit and relative priority. Python visits proposed
+audits in descending ordinal priority, breaks ties by training-weighted residual
+loss, and enforces the remaining audit/time budgets before every solve. This
+can allocate a scarce audit to a later node instead of spending it in node-ID
+order. Nodes outside the configured request cap are skipped; the cap retains
+nodes with the largest training-weighted residual. Skipped nodes still receive
+the ordinary shallow rolling update.
+
+Controller state schema 3 adds the node's fraction of training rows, current
+committed-region loss, and aggregate per-leaf support, class proportions, Gini,
+and best feasible one-split Gini gain. It also receives up to 16 earlier audit
+observations with measured duration, independently scored local objective and
+current commitment status. History exists even with tracing disabled and resets
+on every fit. These observations do not establish causal final-tree gains, and
+one-split evidence cannot identify every higher-order interaction. Test labels,
+raw rows and feature/class names are not included.
+
+The controller has no calibrated confidence threshold by default; explicit
+abstention still skips. Priorities are ordinal judgments, not predicted gains.
+The optional duration estimate must come from separate measurements; otherwise
+only observed past durations are supplied. Enabling broader control does not
+establish an advantage over local rules given the same evidence.
+
+`AuditExample(state, final_objective_gain, audit_seconds)` supplies offline
+evidence from paired full continuations with and without one audit. Freeze
+these examples before evaluating new cases; use training-objective differences,
+not test labels or local incumbent regret. Examples, a gain floor and
+code-computed evidence buckets are sent explicitly as development context.
+They are optional and remain configuration on the saved controller, so include
+only aggregate evidence intended for reuse and provider submission.
+
+Custom controllers implement the ordinary `select(state, *, timeout)` root
+interface and `plan(states, *, history, timeout) -> AuditPlan` for frontiers.
+An `AuditPlan` maps every supplied node ID to an `AuditDecision`, whose optional
+`priority` is in `[0, 1]`. It owns the batch's `input_tokens`; individual plan
+decisions must not duplicate usage. Invalid plans fail closed for the whole
+frontier. A batch consumes one policy call, with its charged time and token
+usage in a `policy_plan` trace event; per-node policy events reference that
+call. Several per-node fallbacks can therefore follow one failed plan call.
+
+The selector is called after ordinary eligibility checks. At most
+`policy_max_calls` attempts are made per fit; the default is 8, with a default
+`policy_time_limit` of 1 second. Both counters reset on refit. Request timeouts
+are bounded by the remaining fit/policy allowance, retries are disabled, and
+budgets are rechecked before the deeper solve. These limits are cooperative:
+SDK HTTP timeouts apply per operation, and neither requests nor numerical work
+are forcibly cancelled at an exact wall-clock deadline.
+
+Low confidence, `insufficient_evidence`, unavailable SDK/key, malformed results,
+and API errors retain the shallow baseline. Failures emit one warning per fit;
+check the trace rather than assuming that a successful fit proves Jev worked.
+The first supported fallback is `skip`. Confidence describes the distribution
+over actions, not measured correctness or predicted objective improvement.
+
+`policy_call_count_` counts attempted selector invocations (including failures
+before an HTTP request); `policy_time_` includes pre-decision scoring, state
+extraction, fingerprinting, and client work; `policy_input_tokens_` sums known reported input usage only;
+`policy_fallback_count_` counts fallback decisions after attempted calls.
+Trace records include action, original proposed action when available,
+probabilities/confidence, effective action after budget checks, latency, requested
+and returned models, prompt/state versions, state hash, and explicit fallback
+reason. `cache_status="disabled"` identifies uncached calls. Audit events report
+local `adopted_as_candidate` separately from `final_commit` and
+`final_commit_reason`, including region rejection, level rollback, and later
+replacement of the audited region. Expanding a child region preserves its
+ancestor audit's commitment. An audit candidate's adoption alone is not a
+final commitment. Candidate structure, class/feature membership, routed sample
+support, and objective agreement are checked independently before adoption.
+
+`JevAuditSelector` is sklearn-cloneable and stores only configuration. The SDK
+is imported lazily, the key is read from the environment, and clients are closed
+after each request. Saved models can predict without the SDK or credentials.
+The default `adaptive_lookahead=None` makes no calls. To use another policy,
+provide a selector with `select(state: AuditState, *, timeout: float)` returning
+an `AuditDecision` with action `audit`, `skip`, or `insufficient_evidence`.
+Custom selectors must honor the cooperative timeout and be cloneable/pickleable
+if used with sklearn or model persistence.
+
+Run `python examples/jev_smoke.py` after setting the key to exercise one real
+request, a complete fit, and the baseline comparison. It incurs API usage and
+fails if no usable Jev response is recorded; abstention is a valid response.
+This toy smoke test checks connectivity, not whether Jev improves performance.
+No hosted-model benchmark advantage is claimed. The model is pinned, but a
+fixed random seed does not guarantee identical hosted responses.
+
+This integration implements the optional policy hook and provider adapter.
+The offline paired-continuation dataset, learned baselines, response cache/replay,
+and held-out quality/runtime experiments proposed in the integration plan remain
+research work. Online usefulness has not been established.
+
+Official API contract: [TypeSafe Python SDK](https://docs.typesafe.ai/sdk/python).

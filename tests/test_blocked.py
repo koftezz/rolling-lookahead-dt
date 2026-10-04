@@ -34,7 +34,7 @@ def test_interruption_preserves_incumbent(monkeypatch):
     from rollotree.solver import blocked
     X = np.array(list(product((0, 1), repeat=3)))
     arr = np.column_stack([X[:, 0], X])
-    ticks = iter([0, 2])
+    ticks = iter([0, 0, 2])  # initial guard, first block, interrupted second block
     monkeypatch.setattr(blocked.time, "time", lambda: next(ticks))
     sol = PuLPOCT2Solver(SolverConfig(solver_name="direct", direct_block_size=1, deadline=1), get_criterion("gini")).solve(pd.DataFrame(arr), [1, 2, 3], [0, 1])
     assert sol.status == SolverStatus.TIME_LIMIT

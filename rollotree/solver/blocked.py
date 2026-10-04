@@ -8,6 +8,14 @@ from rollotree.tree.impurity import GiniCriterion, MisclassificationCriterion
 def solve_blocked(config, criterion, data, features, classes, y_idx=0):
     if not isinstance(criterion, (GiniCriterion, MisclassificationCriterion)):
         raise TypeError("Blocked direct supports built-in additive criteria")
+    started_at = time.time()
+    deadlines = [value for value in (config.deadline,
+                 None if config.time_limit is None else started_at + config.time_limit)
+                 if value is not None]
+    deadline = min(deadlines) if deadlines else None
+    if deadline is not None and started_at >= deadline:
+        return OCT2Solution(status=SolverStatus.TIME_LIMIT,
+                            coefficient_time=0.0, runtime=0.0)
     arr = np.asarray(data)
     F = np.asarray(arr[:, features], dtype=np.float64)
     labels = arr[:, y_idx]
@@ -18,7 +26,7 @@ def solve_blocked(config, criterion, data, features, classes, y_idx=0):
     scan_time = 0.0
     interrupted = False
     for start in range(0, p, config.direct_block_size):
-        if config.deadline is not None and time.time() >= config.deadline:
+        if deadline is not None and time.time() >= deadline:
             interrupted = True
             break
         tick = time.perf_counter()
