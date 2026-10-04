@@ -23,6 +23,8 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
+      - if: matrix.python-version == '3.11'
+        run: python -m pip install -e ".[jev]"
       - run: python -m pytest -q
       - if: matrix.python-version == '3.11'
         run: python -m build

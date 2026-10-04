@@ -102,6 +102,9 @@ class RollingOptimizer:
         audit_budget=2,
         audit_threshold=0.02,
         audit_min_samples=32,
+        audit_selector=None,
+        policy_time_limit=1.0,
+        policy_max_calls=8,
     ):
         self.solver_config = solver_config
         self.criterion = criterion
@@ -116,8 +119,16 @@ class RollingOptimizer:
         self.audit_budget = audit_budget
         self.audit_threshold = audit_threshold
         self.audit_min_samples = audit_min_samples
+        self.audit_selector = audit_selector
+        self.policy_time_limit = policy_time_limit
+        self.policy_max_calls = policy_max_calls
         self.audit_count_ = 0
         self.audit_time_ = 0.0
+        self.policy_time_ = 0.0
+        self.policy_call_count_ = 0
+        self.policy_input_tokens_ = 0
+        self.policy_fallback_count_ = 0
+        self._policy_warned = False
         self.search_trace_ = []
 
         self.fit_status_ = "completed"
@@ -132,6 +143,19 @@ class RollingOptimizer:
         if self.trace:
             self.search_trace_.append(dict(backend=self.solver_config.solver_name,
                 remaining_budget=self._remaining_time(), **event))
+
+    def _finalize_audits(self, trace_start, committed, reason):
+        """Separate local solver adoption from optimizer commitment."""
+        for event in self.search_trace_[trace_start:]:
+            if event.get("event") == "audit" and event.get("adopted_as_candidate"):
+                event.update(final_commit=bool(committed), final_commit_reason=reason)
+
+    def _supersede_audits(self, trace_stop, roots):
+        """A later accepted region replacement can discard an earlier audit."""
+        for event in self.search_trace_[:trace_stop]:
+            if (event.get("event") == "audit" and event.get("final_commit")
+                    and any(_descends_from(event["node"], root) for root in roots)):
+                event.update(final_commit=False, final_commit_reason="superseded")
 
     def _remaining_time(self) -> Optional[float]:
         if self._deadline is None:
@@ -309,6 +333,11 @@ class RollingOptimizer:
         self._target_depth = target_depth
         self.audit_count_ = 0
         self.audit_time_ = 0.0
+        self.policy_time_ = 0.0
+        self.policy_call_count_ = 0
+        self.policy_input_tokens_ = 0
+        self.policy_fallback_count_ = 0
+        self._policy_warned = False
         self.subproblem_diagnostics_ = []
         self.search_trace_ = []
         self._started_at = time.perf_counter()
@@ -350,6 +379,7 @@ class RollingOptimizer:
         self._record(event="initial", node=1, depth=0, n_samples=len(train_data),
                      accepted=True, proposed_objective=(score_tree(tree, X_train, y_train, self.criterion) if self.trace else None),
                      proposed_accuracy=train_accuracy, status=initial_status.value)
+        self._finalize_audits(0, True, "initial_tree_committed")
 
         if initial_status == SolverStatus.TIME_LIMIT:
             self.fit_status_ = "time_limit"
@@ -460,6 +490,7 @@ class RollingOptimizer:
             trace_start = len(self.search_trace_)
             merged = 0
             saw_timeout = False
+            committed_roots = []
 
             input_by_parent = {item.parent_node: item for item in inputs}
             for result in results_list:
@@ -474,6 +505,7 @@ class RollingOptimizer:
                            if self.trace or self.acceptance_policy == "objective" else None)
                 old_acc = float(np.mean(tree.predict(sub_X) == sub_y))
                 accepted = False
+                audit_trace_start = len(self.search_trace_)
                 new_obj, new_acc = None, None
                 if result.timed_out:
                     status = SolverStatus.TIME_LIMIT.value
@@ -514,7 +546,11 @@ class RollingOptimizer:
                     else:
                         merged += 1
                         accepted = True
+                        committed_roots.append(result.parent_node)
                     saw_timeout |= solution.status == SolverStatus.TIME_LIMIT
+
+                self._finalize_audits(audit_trace_start, accepted,
+                                      "region_committed" if accepted else skip_reason)
 
                 self._record(event="update", node=result.parent_node, depth=depth-2,
                     n_samples=result.n_samples, n_features=len(inp.features), status=status,
@@ -573,6 +609,7 @@ class RollingOptimizer:
                 for event in self.search_trace_[trace_start:]:
                     if event.get("accepted"):
                         event.update(accepted=False, reason="level_accuracy_regression")
+                self._finalize_audits(trace_start, False, "level_accuracy_regression")
                 tree = snapshot
                 self.fit_status_ = "early_stopped"
                 self.subproblem_diagnostics_.append(
@@ -586,6 +623,8 @@ class RollingOptimizer:
                     )
                 )
                 break
+
+            self._supersede_audits(trace_start, committed_roots)
 
             actual_depth = tree.get_depth()
             elapsed = time.perf_counter() - level_started

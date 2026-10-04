@@ -26,7 +26,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "pulp>=2.7",
+    "pulp>=2.7,<4",
     "highspy>=1.5",
     "numpy>=1.24",
     "pandas>=2.0",
@@ -36,6 +36,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+jev = ["typesafe-sdk>=0.7.1,<0.8; python_version >= '3.10'"]
 fast = ["numba>=0.58"]
 gurobi = ["gurobipy>=10.0"]
 dev = [

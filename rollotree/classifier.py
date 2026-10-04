@@ -64,6 +64,13 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
     initial_depth : {2, 3}, default=2
         Exact seed-tree depth. Depth 3 enumerates each root feature and solves
         the two independent OCT-2 child subtrees.
+    audit_selector : object or None, default=None
+        Optional selector with select(state, *, timeout), required only with
+        adaptive_lookahead="policy". May perform network requests during fit.
+    policy_time_limit : float, default=1.0
+        Cooperative total policy time allowance per fit, in seconds.
+    policy_max_calls : int, default=8
+        Maximum selector attempts per fit. Zero disables policy calls.
     """
 
     def __init__(
@@ -89,6 +96,9 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         audit_budget: int = 2,
         audit_threshold: float = 0.02,
         audit_min_samples: int = 32,
+        audit_selector=None,
+        policy_time_limit: float = 1.0,
+        policy_max_calls: int = 8,
     ):
         self.depth = depth
         self.criterion = criterion
@@ -111,6 +121,9 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         self.audit_budget = audit_budget
         self.audit_threshold = audit_threshold
         self.audit_min_samples = audit_min_samples
+        self.audit_selector = audit_selector
+        self.policy_time_limit = policy_time_limit
+        self.policy_max_calls = policy_max_calls
         self._is_fitted = False
 
     @property
@@ -180,6 +193,9 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             audit_budget=self.audit_budget,
             audit_threshold=self.audit_threshold,
             audit_min_samples=self.audit_min_samples,
+            audit_selector=self.audit_selector,
+            policy_time_limit=self.policy_time_limit,
+            policy_max_calls=self.policy_max_calls,
         )
         self.tree_, self.depth_results_ = optimizer.build_tree(
             train_data=train_df,
@@ -190,6 +206,10 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
         )
         self.audit_count_ = optimizer.audit_count_
         self.audit_time_ = optimizer.audit_time_
+        self.policy_call_count_ = optimizer.policy_call_count_
+        self.policy_time_ = optimizer.policy_time_
+        self.policy_input_tokens_ = optimizer.policy_input_tokens_
+        self.policy_fallback_count_ = optimizer.policy_fallback_count_
         self.search_trace_ = optimizer.search_trace_
         self.fit_status_ = optimizer.fit_status_
         self.fit_time_ = optimizer.fit_time_
@@ -262,6 +282,9 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             "audit_budget": 2,
             "audit_threshold": 0.02,
             "audit_min_samples": 32,
+            "audit_selector": None,
+            "policy_time_limit": 1.0,
+            "policy_max_calls": 8,
         }
         for name, value in defaults.items():
             if not hasattr(model, name):
@@ -326,10 +349,19 @@ class RollingOCT(ClassifierMixin, BaseEstimator):
             )
 
     def _validate_parameters(self):
-        if self.adaptive_lookahead not in (None, "gap", "impurity", "samples", "random", "fixed"):
+        if self.adaptive_lookahead not in (None, "gap", "impurity", "samples", "random", "fixed", "policy"):
             raise ValueError("Unknown adaptive_lookahead heuristic")
         if self.adaptive_lookahead is not None and self.solver.lower() != "direct":
             raise ValueError("Experimental adaptive lookahead requires solver=direct")
+        if self.adaptive_lookahead == "policy":
+            if not callable(getattr(self.audit_selector, "select", None)):
+                raise ValueError("policy mode requires an audit_selector with select()")
+            if callable(getattr(self.audit_selector, "validate", None)):
+                self.audit_selector.validate()
+        elif self.audit_selector is not None:
+            raise ValueError("audit_selector requires adaptive_lookahead='policy'")
+        self._validate_positive_real("policy_time_limit", self.policy_time_limit)
+        self._validate_minimum_integer("policy_max_calls", self.policy_max_calls, 0)
         self._validate_minimum_integer("audit_budget", self.audit_budget, 0)
         self._validate_minimum_integer("audit_min_samples", self.audit_min_samples, 1)
         if not isinstance(self.audit_threshold, Real) or not np.isfinite(self.audit_threshold) or self.audit_threshold < 0:

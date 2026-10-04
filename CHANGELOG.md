@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Optional audit selector interface with versioned aggregate node summaries and sklearn-compatible `JevAuditSelector`; install the `jev` extra on Python 3.10+.
+- Fit-wide policy call/time allowances, safe skip fallback, usage counters, and requested/returned model provenance. Default fits and predictions remain network-free.
+- Explicit audit commitment traces for later region rejection, level rollback, and superseded replacements.
+- Opt-in live connectivity example and SDK integration tests using a local HTTP transport.
+
+### Fixed
+- Honor cooperative deadlines and per-solve time limits in dense and blocked direct solves; propagate configured deadlines to exact depth-3 search.
+- Independently reject malformed or sample-support-violating deeper audit incumbents before numerical acceptance.
+- Charge policy summary extraction/fingerprinting to its allowance and distinguish deliberate skip decisions from fallback counts.
+- Keep PuLP below its incompatible upcoming 4.0 API.
+
+### Limitations
+- Hosted selection is experimental; no quality/runtime advantage has been established. Offline outcome datasets, cache/replay, and learned-selector comparisons are separate research work.
+- Timeouts remain cooperative rather than hard cancellation deadlines.
+
 ## [2.2.0] - 2026-09-14
 
 ### Added
